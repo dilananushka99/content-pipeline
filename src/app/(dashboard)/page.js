@@ -707,7 +707,7 @@ export default function DashboardPage() {
         {/* 3. Kanban Board Workspace */}
         <div className="flex-1 overflow-x-auto px-8 pb-8 pt-4">
           <div 
-            className="flex gap-4 h-[calc(100vh-270px)] items-stretch pb-2"
+            className="flex gap-4 items-start pb-2"
             style={{ minWidth: `${(stages.length + (isAdmin ? 1 : 0)) * 296 + 32}px` }}
           >
             {isLoading ? (

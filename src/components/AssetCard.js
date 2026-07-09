@@ -98,7 +98,7 @@ export default function AssetCard({
               <img
                 src={req.url}
                 alt={req.title}
-                className="w-full h-48 object-cover rounded-lg border border-slate-100 bg-slate-200 shrink-0"
+                className="w-full h-48 object-contain rounded-lg border border-slate-200 bg-slate-950 shrink-0"
               />
               <div className="flex items-center justify-between gap-3">
                 <div className="flex-1 min-w-0 flex flex-col gap-0.5">
@@ -198,7 +198,7 @@ export default function AssetCard({
                   <img
                     src={req.thumbnailUrl}
                     alt={`${req.title} Thumbnail`}
-                    className="w-full h-48 object-cover rounded-lg border border-slate-100 bg-slate-200 shrink-0"
+                    className="w-full h-48 object-contain rounded-lg border border-slate-200 bg-slate-950 shrink-0"
                   />
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex-1 min-w-0 flex flex-col gap-0.5">

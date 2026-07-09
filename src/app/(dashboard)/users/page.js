@@ -17,7 +17,8 @@ import {
   ClipboardList,
   CheckCircle,
   XCircle,
-  X
+  X,
+  Megaphone
 } from 'lucide-react';
 
 export default function UsersDirectoryPage() {
@@ -26,7 +27,7 @@ export default function UsersDirectoryPage() {
 
   const [users, setUsers] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('teachers'); // 'teachers' | 'staff'
+  const [activeTab, setActiveTab] = useState('teachers'); // 'teachers' | 'staff' | 'marketing' | 'admins'
   const [isLoading, setIsLoading] = useState(true);
   const [isUsingSandbox, setIsUsingSandbox] = useState(!isSupabaseConfigured);
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
@@ -105,10 +106,11 @@ export default function UsersDirectoryPage() {
   const stats = useMemo(() => {
     const teachers = resolvedUsers.filter(u => u.role.toLowerCase() === 'teacher').length;
     const staff = resolvedUsers.filter(u => u.role.toLowerCase() === 'staff').length;
+    const marketing = resolvedUsers.filter(u => u.role.toLowerCase() === 'staff (marketing)').length;
     const admins = resolvedUsers.filter(u => u.role.toLowerCase() === 'admin').length;
     const total = resolvedUsers.length;
     
-    return { teachers, staff, admins, total };
+    return { teachers, staff, marketing, admins, total };
   }, [resolvedUsers]);
 
   // Filter users based on query and active tab selection
@@ -119,7 +121,13 @@ export default function UsersDirectoryPage() {
       if (activeTab === 'teachers' && roleLower !== 'teacher') {
         return false;
       }
-      if (activeTab === 'staff' && roleLower !== 'staff' && roleLower !== 'admin') {
+      if (activeTab === 'staff' && roleLower !== 'staff') {
+        return false;
+      }
+      if (activeTab === 'marketing' && roleLower !== 'staff (marketing)') {
+        return false;
+      }
+      if (activeTab === 'admins' && roleLower !== 'admin') {
         return false;
       }
 
@@ -338,7 +346,7 @@ export default function UsersDirectoryPage() {
         )}
 
         {/* User metrics summary grid */}
-        <section className="grid grid-cols-2 md:grid-cols-4 gap-4 shrink-0">
+        <section className="grid grid-cols-2 md:grid-cols-5 gap-4 shrink-0">
           
           <div className="bg-white border border-slate-200 rounded-xl p-4 flex items-center gap-3.5 shadow-sm hover:border-slate-300 transition-all select-none">
             <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
@@ -367,6 +375,16 @@ export default function UsersDirectoryPage() {
             <div className="flex flex-col">
               <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Staff Members</span>
               <h3 className="text-xl font-black text-[#1F2937] leading-none mt-1">{stats.staff}</h3>
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-xl p-4 flex items-center gap-3.5 shadow-sm hover:border-slate-300 transition-all select-none">
+            <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+              <Megaphone className="w-5 h-5 text-amber-600" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Marketing Staff</span>
+              <h3 className="text-xl font-black text-[#1F2937] leading-none mt-1">{stats.marketing}</h3>
             </div>
           </div>
 
@@ -408,7 +426,29 @@ export default function UsersDirectoryPage() {
                 }`}
               >
                 <User className="w-4 h-4" />
-                <span>Staff & Admins ({stats.staff + stats.admins})</span>
+                <span>Staff ({stats.staff})</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('marketing')}
+                className={`py-4 px-4 text-xs font-bold tracking-wider uppercase border-b-2 cursor-pointer transition flex items-center gap-2 ${
+                  activeTab === 'marketing'
+                    ? 'border-[#109FC6] text-[#109FC6]'
+                    : 'border-transparent text-slate-500 hover:text-[#1F2937]'
+                }`}
+              >
+                <Megaphone className="w-4 h-4" />
+                <span>Staff (Marketing) ({stats.marketing})</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('admins')}
+                className={`py-4 px-4 text-xs font-bold tracking-wider uppercase border-b-2 cursor-pointer transition flex items-center gap-2 ${
+                  activeTab === 'admins'
+                    ? 'border-[#109FC6] text-[#109FC6]'
+                    : 'border-transparent text-slate-500 hover:text-[#1F2937]'
+                }`}
+              >
+                <ShieldAlert className="w-4 h-4" />
+                <span>Administrators ({stats.admins})</span>
               </button>
             </div>
             

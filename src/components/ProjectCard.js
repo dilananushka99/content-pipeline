@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, User, Link2, FileText, Video, Eye, CheckCircle2, Clock } from 'lucide-react';
+import { Calendar, User, Link2, FileText, Video, Eye, CheckCircle2, Clock, Image as ImageIcon } from 'lucide-react';
 
 export default function ProjectCard({ project, onClick, stage: stageProp }) {
   const {
@@ -20,6 +20,16 @@ export default function ProjectCard({ project, onClick, stage: stageProp }) {
   } = project;
 
   const currentStageDeadline = stage_deadlines?.[current_status];
+
+  const hasRequirements = Array.isArray(project.asset_requirements) && project.asset_requirements.length > 0;
+  
+  const pendingImageCount = hasRequirements
+    ? project.asset_requirements.filter(req => req.type === 'Image' && req.status !== 'Uploaded' && !req.url).length
+    : 3;
+  
+  const pendingVideoCount = hasRequirements
+    ? project.asset_requirements.filter(req => req.type === 'Video' && req.status !== 'Uploaded' && !req.url).length
+    : 1;
 
   const stage = stageProp || { 
     id: current_status, 
@@ -269,8 +279,20 @@ export default function ProjectCard({ project, onClick, stage: stageProp }) {
         )}
       </div>
 
+      {/* Pending Deliverables Counters */}
+      <div className="flex items-center gap-2.5 pt-2 border-t border-[#112B42]/5 z-10">
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 border border-slate-200/45 rounded text-[10px] font-semibold text-slate-500 hover:bg-slate-100/50 transition-colors">
+          <ImageIcon className="w-3.5 h-3.5 text-[#109FC6] shrink-0" />
+          <span>{pendingImageCount} {pendingImageCount === 1 ? 'Image' : 'Images'}</span>
+        </span>
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 border border-slate-200/45 rounded text-[10px] font-semibold text-slate-500 hover:bg-slate-100/50 transition-colors">
+          <Video className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+          <span>{pendingVideoCount} {pendingVideoCount === 1 ? 'Video' : 'Videos'}</span>
+        </span>
+      </div>
+
       {/* Assigned Staff Responsibilities */}
-      <div className="flex flex-wrap gap-1 mt-auto pt-2 border-t border-[#112B42]/5 z-10">
+      <div className="flex flex-wrap gap-1 mt-auto pt-1.5 z-10">
         {project.assigned_staff && project.assigned_staff.length > 0 ? (
           project.assigned_staff.map((staff, idx) => (
             <span

@@ -195,7 +195,7 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
   const [isUploading, setIsUploading] = useState(false);
   const [isDuplicating, setIsDuplicating] = useState(false);
   const [newVideoUrl, setNewVideoUrl] = useState('');
-  const [activeTab, setActiveTab] = useState('details'); // 'details' | 'scripts' | 'references' | 'media'
+  const [activeTab, setActiveTab] = useState('details'); // 'details' | 'scripts' | 'references' | 'pending_assets' | 'delivered_assets'
   const [newReqType, setNewReqType] = useState('Image');
   const [newReqTitle, setNewReqTitle] = useState('');
   const [newReqSpecs, setNewReqSpecs] = useState('');
@@ -745,16 +745,27 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
             >
               References
             </button>
-            <button
+             <button
               type="button"
-              onClick={() => setActiveTab('media')}
+              onClick={() => setActiveTab('pending_assets')}
               className={`text-xs uppercase font-bold tracking-wide rounded-lg px-4 py-2 cursor-pointer transition-all select-none ${
-                activeTab === 'media'
+                activeTab === 'pending_assets'
                   ? 'bg-[#109FC6] text-white shadow-sm'
                   : 'text-slate-600 hover:bg-slate-200/50 hover:text-[#1F2937]'
               }`}
             >
-              Assets & Delivery
+              Pending Assets
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('delivered_assets')}
+              className={`text-xs uppercase font-bold tracking-wide rounded-lg px-4 py-2 cursor-pointer transition-all select-none ${
+                activeTab === 'delivered_assets'
+                  ? 'bg-[#109FC6] text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-200/50 hover:text-[#1F2937]'
+              }`}
+            >
+              Delivered
             </button>
           </div>
 
@@ -798,12 +809,21 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab('media')}
+            onClick={() => setActiveTab('pending_assets')}
             className={`text-[10px] uppercase font-bold tracking-wider rounded-lg px-3 py-1.5 transition select-none shrink-0 ${
-              activeTab === 'media' ? 'bg-[#109FC6] text-white' : 'text-slate-600 hover:bg-slate-100'
+              activeTab === 'pending_assets' ? 'bg-[#109FC6] text-white' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            Assets
+            Pending Assets
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('delivered_assets')}
+            className={`text-[10px] uppercase font-bold tracking-wider rounded-lg px-3 py-1.5 transition select-none shrink-0 ${
+              activeTab === 'delivered_assets' ? 'bg-[#109FC6] text-white' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            Delivered
           </button>
         </div>
 
@@ -1372,16 +1392,16 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
               </div>
             )}
 
-            {activeTab === 'media' && (
+            {activeTab === 'pending_assets' && (
               <div className="space-y-5">
                 
                 {/* Deliverables Header */}
                 <div className="flex flex-col gap-1">
                   <h4 className="text-sm font-bold text-[#1F2937] uppercase tracking-wide">
-                    Deliverable Asset Requirements
+                    Pending Asset Requirements
                   </h4>
                   <p className="text-xs text-slate-500">
-                    Review deliverables requested by the project managers, upload files, or paste delivery links.
+                    Review deliverable requirements waiting for files to be uploaded or video links to be set.
                   </p>
                 </div>
 
@@ -1481,16 +1501,23 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                   </div>
                 )}
 
-                {/* Requirements List */}
+                {/* Requirements List (Filtered for Pending) */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-                  {!formData.asset_requirements || formData.asset_requirements.length === 0 ? (
-                    <div className="col-span-full flex flex-col items-center justify-center py-8 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 text-slate-400 text-center text-xs">
-                      <span>No asset requirements defined yet.</span>
-                      {isAdmin && <span className="text-[10px] text-slate-500 mt-1">Use the setup form above to create deliverables.</span>}
-                    </div>
-                  ) : (
-                    formData.asset_requirements.map((req) => {
-                      // Calculate pending platform publish count
+                  {(() => {
+                    const pendingRequirements = (formData.asset_requirements || []).filter(req => {
+                      const isUploaded = req.status === 'Uploaded' || !!req.url;
+                      return !isUploaded;
+                    });
+                    
+                    if (pendingRequirements.length === 0) {
+                      return (
+                        <div className="col-span-full flex flex-col items-center justify-center py-8 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 text-slate-400 text-center text-xs">
+                          <span>No pending assets remaining. All deliverables are uploaded!</span>
+                        </div>
+                      );
+                    }
+
+                    return pendingRequirements.map((req) => {
                       const platforms = ['pensala', 'facebook', 'youtube', 'instagram', 'tiktok', 'linkedin'];
                       const pendingPublishCount = platforms.reduce((acc, platform) => {
                         const url = req.publishing?.[platform]?.url;
@@ -1519,8 +1546,82 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                           pendingPublishCount={pendingPublishCount}
                         />
                       );
-                    })
-                  )}
+                    });
+                  })()}
+                </div>
+
+              </div>
+            )}
+
+            {activeTab === 'delivered_assets' && (
+              <div className="space-y-5">
+                
+                {/* Deliverables Header */}
+                <div className="flex flex-col gap-1">
+                  <h4 className="text-sm font-bold text-[#1F2937] uppercase tracking-wide">
+                    Delivered Assets
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    Review completed deliverables that have already been uploaded or marked as finished.
+                  </p>
+                </div>
+
+                {/* Upload Spinner */}
+                {isUploading && (
+                  <div className="p-4 bg-[#109FC6]/5 border border-[#109FC6]/20 rounded-xl flex items-center justify-center gap-2.5 text-xs text-[#109FC6] font-bold animate-pulse">
+                    <div className="w-4 h-4 rounded-full border-2 border-[#109FC6] border-t-transparent animate-spin" />
+                    <span>Uploading deliverable asset to storage...</span>
+                  </div>
+                )}
+
+                {/* Requirements List (Filtered for Delivered) */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+                  {(() => {
+                    const deliveredRequirements = (formData.asset_requirements || []).filter(req => {
+                      const isUploaded = req.status === 'Uploaded' || !!req.url;
+                      return isUploaded;
+                    });
+                    
+                    if (deliveredRequirements.length === 0) {
+                      return (
+                        <div className="col-span-full flex flex-col items-center justify-center py-8 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 text-slate-400 text-center text-xs">
+                          <span>No deliverables completed yet.</span>
+                          {isAdmin && <span className="text-[10px] text-slate-500 mt-1">Upload files on the pending tab to mark them delivered.</span>}
+                        </div>
+                      );
+                    }
+
+                    return deliveredRequirements.map((req) => {
+                      const platforms = ['pensala', 'facebook', 'youtube', 'instagram', 'tiktok', 'linkedin'];
+                      const pendingPublishCount = platforms.reduce((acc, platform) => {
+                        const url = req.publishing?.[platform]?.url;
+                        if (!url || !url.trim()) {
+                          return acc + 1;
+                        }
+                        return acc;
+                      }, 0);
+
+                      return (
+                        <AssetCard
+                          key={req.id}
+                          req={req}
+                          projectName={formData.project_name}
+                          courseName={formData.course_name}
+                          teacherName={formData.teacher_name}
+                          isAdmin={isAdmin}
+                          handleDownloadAssetFile={handleDownloadAssetFile}
+                          handleDeleteAssetFile={handleDeleteAssetFile}
+                          handleDeleteAssetThumbnail={handleDeleteAssetThumbnail}
+                          handleUploadAsset={handleUploadAsset}
+                          handleUpdateAssetVideoUrl={handleUpdateAssetVideoUrl}
+                          handleUpdateAssetStaffNote={handleUpdateAssetStaffNote}
+                          handleDeleteAssetRequirement={handleDeleteAssetRequirement}
+                          setPublishingModalAssetId={setPublishingModalAssetId}
+                          pendingPublishCount={pendingPublishCount}
+                        />
+                      );
+                    });
+                  })()}
                 </div>
 
               </div>

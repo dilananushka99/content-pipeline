@@ -38,7 +38,7 @@ export default function KanbanColumn({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`flex flex-col flex-1 min-w-[280px] max-w-[350px] rounded-2xl border border-slate-200 bg-white p-4 transition-all duration-300 shadow-sm ${
+      className={`flex flex-col h-fit min-w-[280px] max-w-[350px] rounded-2xl border border-slate-200 bg-white p-4 transition-all duration-300 shadow-sm ${
         isDragOver ? 'drag-over-column scale-[1.01] border-[#109FC6]' : ''
       }`}
     >
@@ -130,8 +130,8 @@ export default function KanbanColumn({
         )}
       </div>
 
-      {/* Cards Scrollable area */}
-      <div className="flex flex-col gap-3 flex-grow overflow-y-auto max-h-[calc(100vh-280px)] pr-1 min-h-[150px]">
+      {/* Cards container */}
+      <div className="flex flex-col gap-3 w-full">
         {projects.length > 0 ? (
           projects.map((project) => (
             <ProjectCard
