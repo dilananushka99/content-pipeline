@@ -16,6 +16,7 @@ export default function MarketingContentPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [publishingModalAssetId, setPublishingModalAssetId] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [selectedAssetForDetails, setSelectedAssetForDetails] = useState(null);
 
   // Fetch projects from supabase
   const fetchProjects = async () => {
@@ -302,25 +303,22 @@ export default function MarketingContentPage() {
     }
   };
 
-  // Filter projects by stage 'Published' or 'Done', then flatten asset requirements
-  // Only include assets that are successfully uploaded (status is 'Uploaded' or has a valid URL/video link)
+  // Flatten asset requirements from all projects (ignoring status)
+  // Only include assets that are successfully uploaded and approved
   const allAssets = useMemo(() => {
     const list = [];
-    const completedProjects = projects.filter(
-      p => p.current_status === 'Published' || p.current_status === 'Done'
-    );
-
-    completedProjects.forEach(project => {
+    projects.forEach(project => {
       const requirements = project.asset_requirements || [];
       requirements.forEach(req => {
         const isUploaded = req.status === 'Uploaded' || !!req.url;
-        if (isUploaded) {
+        if (isUploaded && req.isApproved === true) {
           list.push({
             ...req,
             projectId: project.id,
             projectName: project.project_name,
             courseName: project.course_name || null,
-            teacherName: project.teacher_name
+            teacherName: project.teacher_name,
+            projectStatus: project.current_status
           });
         }
       });
@@ -436,7 +434,7 @@ export default function MarketingContentPage() {
             <span className="text-[10px] text-slate-500 mt-1">Make sure you have projects marked as "Published" or "Done" containing deliverables.</span>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {displayedAssets.map((asset) => {
               // Calculate pending platform count for individual card trigger badges
               const platforms = ['pensala', 'facebook', 'youtube', 'instagram', 'tiktok', 'linkedin'];
@@ -455,8 +453,10 @@ export default function MarketingContentPage() {
                   projectName={asset.projectName}
                   courseName={asset.courseName}
                   teacherName={asset.teacherName}
+                  projectStatus={asset.projectStatus}
                   isAdmin={isAdmin}
                   isMarketingView={true}
+                  onUploadEdit={setSelectedAssetForDetails}
                   handleDownloadAssetFile={handleDownloadAssetFile}
                   handleDeleteAssetFile={handleDeleteAssetFile}
                   handleDeleteAssetThumbnail={handleDeleteAssetThumbnail}
@@ -479,7 +479,7 @@ export default function MarketingContentPage() {
         const req = allAssets.find(r => r.id === publishingModalAssetId);
         if (!req) return null;
         return (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overflow-y-auto animate-fade-in">
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overflow-y-auto animate-fade-in">
             <div className="relative w-full max-w-lg rounded-2xl border border-slate-200 shadow-2xl flex flex-col bg-white overflow-hidden max-h-[85vh]">
               
               {/* Header */}
@@ -505,32 +505,62 @@ export default function MarketingContentPage() {
               <div className="p-5 overflow-y-auto flex flex-col gap-4">
                 
                 {/* Pensala Web */}
-                <div className="flex flex-col gap-1 w-full">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Pensala Web URL
-                  </label>
-                  <input
-                    type="url"
-                    value={req.publishing?.pensala?.url || ''}
-                    onChange={(e) => handleUpdateAssetPublishing(req.id, 'pensala', 'url', e.target.value)}
-                    placeholder="Paste Pensala URL (e.g. https://pensala.com/course/...)"
-                    className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
-                  />
+                <div className="grid grid-cols-2 gap-4 w-full">
+                  <div className="flex flex-col gap-1 w-full">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      Pensala Web URL
+                    </label>
+                    <input
+                      type="url"
+                      value={req.publishing?.pensala?.url || ''}
+                      onChange={(e) => handleUpdateAssetPublishing(req.id, 'pensala', 'url', e.target.value)}
+                      placeholder="Paste Pensala URL..."
+                      className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1 w-full">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      Pensala Post ID
+                    </label>
+                    <input
+                      type="text"
+                      value={req.publishing?.pensala?.id || ''}
+                      onChange={(e) => handleUpdateAssetPublishing(req.id, 'pensala', 'id', e.target.value)}
+                      placeholder="Enter Post ID..."
+                      className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
+                    />
+                  </div>
                 </div>
 
                 {/* Facebook */}
                 <div className="flex flex-col gap-1.5 w-full">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Facebook URL
-                  </label>
-                  <input
-                    type="url"
-                    value={req.publishing?.facebook?.url || ''}
-                    onChange={(e) => handleUpdateAssetPublishing(req.id, 'facebook', 'url', e.target.value)}
-                    placeholder="Paste Facebook Post URL..."
-                    className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
-                  />
-                  <label className="flex items-center gap-2 text-xs text-[#1F2937] font-semibold cursor-pointer select-none">
+                  <div className="grid grid-cols-2 gap-4 w-full">
+                    <div className="flex flex-col gap-1 w-full">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Facebook URL
+                      </label>
+                      <input
+                        type="url"
+                        value={req.publishing?.facebook?.url || ''}
+                        onChange={(e) => handleUpdateAssetPublishing(req.id, 'facebook', 'url', e.target.value)}
+                        placeholder="Paste Facebook Post URL..."
+                        className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1 w-full">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Facebook Post ID
+                      </label>
+                      <input
+                        type="text"
+                        value={req.publishing?.facebook?.id || ''}
+                        onChange={(e) => handleUpdateAssetPublishing(req.id, 'facebook', 'id', e.target.value)}
+                        placeholder="Enter Post ID..."
+                        className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
+                      />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-[#1F2937] font-semibold cursor-pointer select-none mt-1">
                     <input
                       type="checkbox"
                       checked={req.publishing?.facebook?.boosted || false}
@@ -543,17 +573,33 @@ export default function MarketingContentPage() {
 
                 {/* YouTube */}
                 <div className="flex flex-col gap-1.5 w-full">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    YouTube URL
-                  </label>
-                  <input
-                    type="url"
-                    value={req.publishing?.youtube?.url || ''}
-                    onChange={(e) => handleUpdateAssetPublishing(req.id, 'youtube', 'url', e.target.value)}
-                    placeholder="Paste YouTube Video URL..."
-                    className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
-                  />
-                  <label className="flex items-center gap-2 text-xs text-[#1F2937] font-semibold cursor-pointer select-none">
+                  <div className="grid grid-cols-2 gap-4 w-full">
+                    <div className="flex flex-col gap-1 w-full">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        YouTube URL
+                      </label>
+                      <input
+                        type="url"
+                        value={req.publishing?.youtube?.url || ''}
+                        onChange={(e) => handleUpdateAssetPublishing(req.id, 'youtube', 'url', e.target.value)}
+                        placeholder="Paste YouTube Video URL..."
+                        className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1 w-full">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        YouTube Video ID
+                      </label>
+                      <input
+                        type="text"
+                        value={req.publishing?.youtube?.id || ''}
+                        onChange={(e) => handleUpdateAssetPublishing(req.id, 'youtube', 'id', e.target.value)}
+                        placeholder="Enter Video ID..."
+                        className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
+                      />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-[#1F2937] font-semibold cursor-pointer select-none mt-1">
                     <input
                       type="checkbox"
                       checked={req.publishing?.youtube?.boosted || false}
@@ -567,17 +613,33 @@ export default function MarketingContentPage() {
                 {/* Instagram */}
                 <hr className="border-slate-100 my-1" />
                 <div className="flex flex-col gap-1.5 w-full">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Instagram URL
-                  </label>
-                  <input
-                    type="url"
-                    value={req.publishing?.instagram?.url || ''}
-                    onChange={(e) => handleUpdateAssetPublishing(req.id, 'instagram', 'url', e.target.value)}
-                    placeholder="Paste Instagram URL..."
-                    className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
-                  />
-                  <label className="flex items-center gap-2 text-xs text-[#1F2937] font-semibold cursor-pointer select-none">
+                  <div className="grid grid-cols-2 gap-4 w-full">
+                    <div className="flex flex-col gap-1 w-full">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Instagram URL
+                      </label>
+                      <input
+                        type="url"
+                        value={req.publishing?.instagram?.url || ''}
+                        onChange={(e) => handleUpdateAssetPublishing(req.id, 'instagram', 'url', e.target.value)}
+                        placeholder="Paste Instagram URL..."
+                        className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1 w-full">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Instagram Post ID
+                      </label>
+                      <input
+                        type="text"
+                        value={req.publishing?.instagram?.id || ''}
+                        onChange={(e) => handleUpdateAssetPublishing(req.id, 'instagram', 'id', e.target.value)}
+                        placeholder="Enter Post ID..."
+                        className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
+                      />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-[#1F2937] font-semibold cursor-pointer select-none mt-1">
                     <input
                       type="checkbox"
                       checked={req.publishing?.instagram?.boosted || false}
@@ -591,17 +653,33 @@ export default function MarketingContentPage() {
                 {/* TikTok */}
                 <hr className="border-slate-100 my-1" />
                 <div className="flex flex-col gap-1.5 w-full">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    TikTok URL
-                  </label>
-                  <input
-                    type="url"
-                    value={req.publishing?.tiktok?.url || ''}
-                    onChange={(e) => handleUpdateAssetPublishing(req.id, 'tiktok', 'url', e.target.value)}
-                    placeholder="Paste TikTok URL..."
-                    className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
-                  />
-                  <label className="flex items-center gap-2 text-xs text-[#1F2937] font-semibold cursor-pointer select-none">
+                  <div className="grid grid-cols-2 gap-4 w-full">
+                    <div className="flex flex-col gap-1 w-full">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        TikTok URL
+                      </label>
+                      <input
+                        type="url"
+                        value={req.publishing?.tiktok?.url || ''}
+                        onChange={(e) => handleUpdateAssetPublishing(req.id, 'tiktok', 'url', e.target.value)}
+                        placeholder="Paste TikTok URL..."
+                        className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1 w-full">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        TikTok Video ID
+                      </label>
+                      <input
+                        type="text"
+                        value={req.publishing?.tiktok?.id || ''}
+                        onChange={(e) => handleUpdateAssetPublishing(req.id, 'tiktok', 'id', e.target.value)}
+                        placeholder="Enter Video ID..."
+                        className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
+                      />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-[#1F2937] font-semibold cursor-pointer select-none mt-1">
                     <input
                       type="checkbox"
                       checked={req.publishing?.tiktok?.boosted || false}
@@ -615,17 +693,33 @@ export default function MarketingContentPage() {
                 {/* LinkedIn */}
                 <hr className="border-slate-100 my-1" />
                 <div className="flex flex-col gap-1.5 w-full">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    LinkedIn URL
-                  </label>
-                  <input
-                    type="url"
-                    value={req.publishing?.linkedin?.url || ''}
-                    onChange={(e) => handleUpdateAssetPublishing(req.id, 'linkedin', 'url', e.target.value)}
-                    placeholder="Paste LinkedIn URL..."
-                    className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
-                  />
-                  <label className="flex items-center gap-2 text-xs text-[#1F2937] font-semibold cursor-pointer select-none">
+                  <div className="grid grid-cols-2 gap-4 w-full">
+                    <div className="flex flex-col gap-1 w-full">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        LinkedIn URL
+                      </label>
+                      <input
+                        type="url"
+                        value={req.publishing?.linkedin?.url || ''}
+                        onChange={(e) => handleUpdateAssetPublishing(req.id, 'linkedin', 'url', e.target.value)}
+                        placeholder="Paste LinkedIn URL..."
+                        className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1 w-full">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        LinkedIn Post ID
+                      </label>
+                      <input
+                        type="text"
+                        value={req.publishing?.linkedin?.id || ''}
+                        onChange={(e) => handleUpdateAssetPublishing(req.id, 'linkedin', 'id', e.target.value)}
+                        placeholder="Enter Post ID..."
+                        className="dash-input px-3 py-2.5 rounded-xl text-xs w-full border border-slate-200 bg-white focus:ring-1 focus:ring-[#109FC6]"
+                      />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-[#1F2937] font-semibold cursor-pointer select-none mt-1">
                     <input
                       type="checkbox"
                       checked={req.publishing?.linkedin?.boosted || false}
@@ -647,6 +741,243 @@ export default function MarketingContentPage() {
                 >
                   Save & Close
                 </button>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 4. Asset Details Modal (Read-Only Mode) */}
+      {selectedAssetForDetails && (() => {
+        const req = selectedAssetForDetails;
+        const isImage = req.type === 'Image';
+        const isUploaded = req.status === 'Uploaded' || !!req.url;
+
+        // Calculate pending platforms
+        const platforms = ['pensala', 'facebook', 'youtube', 'instagram', 'tiktok', 'linkedin'];
+        const pendingPublishCount = platforms.reduce((acc, platform) => {
+          const url = req.publishing?.[platform]?.url;
+          if (!url || !url.trim()) return acc + 1;
+          return acc;
+        }, 0);
+
+        return (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overflow-y-auto animate-fade-in">
+            <div className="relative w-full max-w-lg rounded-2xl border border-slate-200 shadow-2xl flex flex-col bg-white overflow-hidden max-h-[85vh] animate-scale-up">
+              
+              {/* Header */}
+              <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-white shrink-0">
+                <div className="flex flex-col">
+                  <span className="text-[9px] uppercase font-extrabold tracking-widest text-[#109FC6]">
+                    Asset Details
+                  </span>
+                  <h3 className="text-sm font-black text-[#1F2937] truncate max-w-xs mt-0.5">
+                    {req.title}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedAssetForDetails(null)}
+                  className="p-1 rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 transition cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="p-5 overflow-y-auto flex flex-col gap-4">
+                
+                {/* Specs */}
+                {req.specs && (
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    <span>Specs:</span>
+                    <span className="text-[#109FC6] font-extrabold">{req.specs}</span>
+                  </div>
+                )}
+
+                {/* Description / Instructions */}
+                {req.description && (
+                  <div className="flex flex-col gap-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-3">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                      Instructions
+                    </span>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      {req.description}
+                    </p>
+                  </div>
+                )}
+
+
+
+                {/* Deliverables Section */}
+                <div className="flex flex-col gap-4 pt-2 border-t border-slate-100">
+                  {isImage ? (
+                    req.url ? (
+                      <div className="flex flex-col gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl shadow-sm">
+                        <img
+                          src={req.url}
+                          alt={req.title}
+                          className="w-full h-48 object-contain rounded-lg border border-slate-200 bg-slate-950 shrink-0"
+                        />
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                            <span className="text-[9px] text-emerald-600 font-bold uppercase tracking-wider">
+                              Delivered Image
+                            </span>
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              <a
+                                href={req.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#109FC6]/10 hover:bg-[#109FC6]/20 text-[#109FC6] text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                              >
+                                View Image <ExternalLink className="w-3 h-3 shrink-0" />
+                              </a>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center p-6 border-2 border-dashed border-slate-200 bg-slate-50 text-slate-400 text-xs rounded-xl">
+                        No image uploaded yet.
+                      </div>
+                    )
+                  ) : (
+                    /* Video Deliverable */
+                    <div>
+                      {req.url ? (
+                        <div className="flex flex-col gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl shadow-sm w-full">
+                          <div className="w-full h-32 rounded-lg border border-slate-200 bg-slate-950 flex flex-col items-center justify-center text-slate-400 font-bold text-xs shrink-0 gap-2">
+                            <span className="text-3xl">🎥</span>
+                            <span>Video Deliverable Uploaded to Drive</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                              <span className="text-[9px] text-emerald-600 font-bold uppercase tracking-wider">
+                                Delivered Video
+                              </span>
+                              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                <a
+                                  href={req.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#109FC6]/10 hover:bg-[#109FC6]/20 text-[#109FC6] text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                                >
+                                  View Video <ExternalLink className="w-3 h-3 shrink-0" />
+                                </a>
+                                {req.webContentLink && (
+                                  <a
+                                    href={req.webContentLink}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                                  >
+                                    Download Video <Download className="w-3 h-3 shrink-0" />
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center p-6 border-2 border-dashed border-slate-200 bg-slate-50 text-slate-400 text-xs rounded-xl">
+                          No video uploaded yet.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Thumbnail (if applicable to video) */}
+                  {!isImage && (
+                    <div className="flex flex-col gap-1.5 w-full">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Video Thumbnail
+                      </label>
+                      {req.thumbnailUrl ? (
+                        <div className="flex flex-col gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl shadow-sm w-full">
+                          <img
+                            src={req.thumbnailUrl}
+                            alt={`${req.title} Thumbnail`}
+                            className="w-full h-48 object-contain rounded-lg border border-slate-200 bg-slate-950 shrink-0"
+                          />
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                              <span className="text-[9px] text-emerald-600 font-bold uppercase tracking-wider">
+                                Delivered Thumbnail
+                              </span>
+                              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                <a
+                                  href={req.thumbnailUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#109FC6]/10 hover:bg-[#109FC6]/20 text-[#109FC6] text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                                >
+                                  View Thumbnail <ExternalLink className="w-3 h-3 shrink-0" />
+                                </a>
+                                <a
+                                  href={req.thumbnailUrl}
+                                  download
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                                >
+                                  Download Thumbnail <Download className="w-3 h-3 shrink-0" />
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center p-6 border-2 border-dashed border-slate-200 bg-slate-50 text-slate-400 text-xs rounded-xl w-full">
+                          No thumbnail uploaded yet.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Staff Notes (Read Only Box) */}
+                  <div className="flex flex-col gap-1.5 w-full">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      Staff Delivery Notes / Description
+                    </label>
+                    <div className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 max-h-[220px] overflow-y-auto">
+                      <textarea
+                        readOnly
+                        rows={6}
+                        value={req.staff_note || ''}
+                        placeholder="No delivery notes provided."
+                        className="w-full bg-transparent border-0 p-0 text-xs text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-0 resize-none h-auto min-h-[150px]"
+                      />
+                    </div>
+                  </div>
+
+                </div>
+
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-center w-full shrink-0">
+                {isUploaded && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPublishingModalAssetId(req.id);
+                    }}
+                    className="px-4 py-2 bg-[#109FC6] hover:bg-[#0d82a2] text-white text-xs font-bold uppercase tracking-wider rounded-xl transition shadow-sm cursor-pointer flex items-center gap-1.5"
+                  >
+                    <span>📢 Manage Publishing</span>
+                    {pendingPublishCount > 0 ? (
+                      <span className="ml-1 bg-orange-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full">
+                        {pendingPublishCount} Pending
+                      </span>
+                    ) : (
+                      <span className="ml-1 bg-emerald-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full">
+                        All Published
+                      </span>
+                    )}
+                  </button>
+                )}
               </div>
 
             </div>

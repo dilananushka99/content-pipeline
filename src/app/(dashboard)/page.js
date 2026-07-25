@@ -388,6 +388,7 @@ export default function DashboardPage() {
       await fetchProjects();
     } catch (err) {
       console.error('Error saving project to Supabase:', err);
+      console.error('Supabase Error Details:', err?.message || err?.details || JSON.stringify(err));
       alert('Failed to save project to remote database. Saved in local session instead.');
       const nextProjects = isEdit 
         ? projects.map(p => p.id === projectData.id ? dbPayload : p)
@@ -395,6 +396,7 @@ export default function DashboardPage() {
       setProjects(nextProjects);
       saveLocalProjects(nextProjects);
       setIsUsingSandbox(true);
+      throw err;
     }
   };
 
