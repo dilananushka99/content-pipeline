@@ -549,7 +549,6 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
             reject(new Error('Upload aborted'));
           };
           
-          xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
           xhr.send(file);
         });
 

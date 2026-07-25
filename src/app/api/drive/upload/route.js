@@ -89,6 +89,9 @@ export async function POST(req) {
       parents: [folderId],
     };
 
+    // Extract client origin dynamically from request headers
+    const clientOrigin = req.headers.get('origin') || req.headers.get('referer') || '*';
+
     const sessionRes = await fetch(
       'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,webViewLink,webContentLink',
       {
@@ -98,6 +101,7 @@ export async function POST(req) {
           'Content-Type': 'application/json; charset=UTF-8',
           'X-Upload-Content-Type': fileType || 'video/mp4',
           'X-Upload-Content-Length': fileSize ? fileSize.toString() : '0',
+          Origin: clientOrigin,
         },
         body: JSON.stringify(metadata),
       }
