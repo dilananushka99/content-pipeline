@@ -459,9 +459,31 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
 
     if (isVideoFile) {
       try {
+        // 1. Get the resumable upload URL
+        const sessionResponse = await fetch('/api/drive/upload', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            fileName: file.name,
+            fileType: file.type || 'video/mp4',
+            fileSize: file.size
+          }),
+        });
+
+        if (!sessionResponse.ok) {
+          const sessionError = await sessionResponse.json();
+          throw new Error(sessionError.error || 'Failed to initiate upload session');
+        }
+
+        const sessionData = await sessionResponse.json();
+        const { uploadUrl } = sessionData;
+
+        // 2. Upload file directly to Google Drive URL
         const data = await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
-          xhr.open('POST', '/api/drive/upload', true);
+          xhr.open('PUT', uploadUrl, true);
           
           const startTime = Date.now();
           
@@ -512,15 +534,10 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                 const resData = JSON.parse(xhr.responseText);
                 resolve(resData);
               } catch (err) {
-                reject(new Error('Invalid response from server'));
+                reject(new Error('Invalid response from Google Drive'));
               }
             } else {
-              try {
-                const resData = JSON.parse(xhr.responseText);
-                reject(new Error(resData.error || `Upload failed with status ${xhr.status}`));
-              } catch (err) {
-                reject(new Error(`Upload failed with status ${xhr.status}`));
-              }
+              reject(new Error(`Upload failed with status ${xhr.status}`));
             }
           };
           
@@ -532,10 +549,29 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
             reject(new Error('Upload aborted'));
           };
           
-          const uploadFormData = new FormData();
-          uploadFormData.append('file', file);
-          xhr.send(uploadFormData);
+          xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+          xhr.send(file);
         });
+
+        // 3. Make the file public via API
+        const actualFileId = data.id || data.fileId;
+        const webViewLink = data.webViewLink;
+        const webContentLink = data.webContentLink;
+
+        const permResponse = await fetch('/api/drive/upload', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            action: 'permission',
+            fileId: actualFileId
+          }),
+        });
+
+        if (!permResponse.ok) {
+          console.warn('Failed to set public viewing permissions');
+        }
 
         setVideoUpload(prev => ({
           ...prev,
@@ -545,10 +581,6 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
         }));
         
         await new Promise(resolve => setTimeout(resolve, 1000));
-
-        const actualFileId = data.id || data.fileId;
-        const webViewLink = data.webViewLink;
-        const webContentLink = data.webContentLink;
 
         setFormData(prev => ({
           ...prev,

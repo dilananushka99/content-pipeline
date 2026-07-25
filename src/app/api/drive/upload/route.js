@@ -1,4 +1,4 @@
-export const maxDuration = 300; // Allow up to 5 minutes for uploading large video files
+export const maxDuration = 300; // Allow up to 5 minutes
 
 import { NextResponse } from 'next/server';
 
@@ -35,11 +35,46 @@ async function getAccessToken() {
 
 export async function POST(req) {
   try {
-    const formData = await req.formData();
-    const file = formData.get('file');
+    const body = await req.json();
+    const { action } = body;
 
-    if (!file) {
-      return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
+    // Sub-action: set file public viewer permissions
+    if (action === 'permission') {
+      const { fileId } = body;
+      if (!fileId) {
+        return NextResponse.json({ error: 'Missing fileId' }, { status: 400 });
+      }
+
+      const accessToken = await getAccessToken();
+      const permissionRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}/permissions`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            role: 'reader',
+            type: 'anyone',
+          }),
+        }
+      );
+
+      if (!permissionRes.ok) {
+        const permissionErr = await permissionRes.text();
+        console.warn('Failed to set public viewing permissions:', permissionErr);
+        return NextResponse.json({ error: permissionErr }, { status: 500 });
+      }
+
+      return NextResponse.json({ success: true });
+    }
+
+    // Default action: Create resumable upload session
+    const { fileName, fileType, fileSize } = body;
+
+    if (!fileName) {
+      return NextResponse.json({ error: 'Missing fileName parameter' }, { status: 400 });
     }
 
     const accessToken = await getAccessToken();
@@ -49,85 +84,41 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Google Drive folder ID is missing' }, { status: 500 });
     }
 
-    // Construct the metadata part
     const metadata = {
-      name: file.name,
+      name: fileName,
       parents: [folderId],
     };
 
-    const boundary = 'drive_upload_boundary_xxxx';
-    const delimiter = `\r\n--${boundary}\r\n`;
-    const closeDelimiter = `\r\n--${boundary}--`;
-
-    const metadataPart =
-      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-      JSON.stringify(metadata);
-
-    const fileBuffer = Buffer.from(await file.arrayBuffer());
-    
-    // Construct the multipart body using Buffer concatenation
-    const bodyHeader = delimiter + metadataPart + delimiter + `Content-Type: ${file.type || 'video/mp4'}\r\n\r\n`;
-    const bodyFooter = closeDelimiter;
-
-    const headerBuffer = Buffer.from(bodyHeader, 'utf-8');
-    const footerBuffer = Buffer.from(bodyFooter, 'utf-8');
-
-    const multipartBody = Buffer.concat([headerBuffer, fileBuffer, footerBuffer]);
-
-    // Send native fetch POST request to Google Drive Upload API
-    const uploadRes = await fetch(
-      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink,webContentLink',
+    const sessionRes = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,webViewLink,webContentLink',
       {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          'Content-Type': `multipart/related; boundary=${boundary}`,
-          'Content-Length': multipartBody.length.toString(),
+          'Content-Type': 'application/json; charset=UTF-8',
+          'X-Upload-Content-Type': fileType || 'video/mp4',
+          'X-Upload-Content-Length': fileSize ? fileSize.toString() : '0',
         },
-        body: multipartBody,
+        body: JSON.stringify(metadata),
       }
     );
 
-    if (!uploadRes.ok) {
-      const uploadErr = await uploadRes.text();
-      throw new Error(`Google Drive API Upload failed: ${uploadErr}`);
+    if (!sessionRes.ok) {
+      const sessionErr = await sessionRes.text();
+      throw new Error(`Google Drive API resumable initialization failed: ${sessionErr}`);
     }
 
-    const uploadData = await uploadRes.json();
-    const fileId = uploadData.id;
-    const webViewLink = uploadData.webViewLink;
-    const webContentLink = uploadData.webContentLink;
-
-    // Set file permissions to 'anyone with the link can view' using native fetch
-    const permissionRes = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${fileId}/permissions`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          role: 'reader',
-          type: 'anyone',
-        }),
-      }
-    );
-
-    if (!permissionRes.ok) {
-      const permissionErr = await permissionRes.text();
-      console.warn('Failed to set public viewing permissions:', permissionErr);
+    const uploadUrl = sessionRes.headers.get('Location');
+    if (!uploadUrl) {
+      throw new Error('Google Drive did not return a resumable Location upload URL');
     }
 
     return NextResponse.json({
       success: true,
-      id: fileId,
-      fileId: fileId,
-      webViewLink,
-      webContentLink,
+      uploadUrl,
     });
   } catch (error) {
-    console.error('Google Drive Upload Error:', error);
+    console.error('Google Drive Resumable API Session Error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
