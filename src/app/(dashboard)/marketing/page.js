@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/lib/AuthContext';
 import AssetCard from '@/components/AssetCard';
-import { Megaphone, RefreshCw, X, Download, ExternalLink } from 'lucide-react';
+import { Megaphone, RefreshCw, X, Download, ExternalLink, Pencil } from 'lucide-react';
 
 export default function MarketingContentPage() {
   const { profile } = useAuth();
@@ -17,6 +17,17 @@ export default function MarketingContentPage() {
   const [publishingModalAssetId, setPublishingModalAssetId] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedAssetForDetails, setSelectedAssetForDetails] = useState(null);
+  const [isAutoPublishing, setIsAutoPublishing] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editedTitle, setEditedTitle] = useState('');
+  const [isUpdatingTitle, setIsUpdatingTitle] = useState(false);
+
+  useEffect(() => {
+    if (selectedAssetForDetails) {
+      setEditedTitle(selectedAssetForDetails.title || '');
+      setIsEditingTitle(false);
+    }
+  }, [selectedAssetForDetails]);
 
   // Fetch projects from supabase
   const fetchProjects = async () => {
@@ -223,6 +234,97 @@ export default function MarketingContentPage() {
       }
       return req;
     });
+  };
+
+  const handleUpdateTitle = async (newTitle) => {
+    if (!selectedAssetForDetails) return;
+    if (!newTitle || !newTitle.trim()) {
+      alert('Title cannot be empty');
+      return;
+    }
+    
+    setIsUpdatingTitle(true);
+    try {
+      const requirementId = selectedAssetForDetails.id;
+      const projectId = selectedAssetForDetails.projectId;
+      
+      const projectToUpdate = projects.find(p => p.id === projectId);
+      if (projectToUpdate) {
+        const updatedRequirements = (projectToUpdate.asset_requirements || []).map(r => {
+          if (r.id === requirementId) {
+            return { ...r, title: newTitle.trim() };
+          }
+          return r;
+        });
+
+        // 1. Database Update
+        const { error } = await supabase
+          .from('content_projects')
+          .update({ asset_requirements: updatedRequirements })
+          .eq('id', projectId);
+
+        if (error) throw error;
+
+        // 2. State update
+        setProjects(prev => prev.map(p => {
+          if (p.id === projectId) {
+            return { ...p, asset_requirements: updatedRequirements };
+          }
+          return p;
+        }));
+
+        // 3. Update active modal requirement state
+        setSelectedAssetForDetails(prev => {
+          if (prev && prev.id === requirementId) {
+            return { ...prev, title: newTitle.trim() };
+          }
+          return prev;
+        });
+
+        setIsEditingTitle(false);
+      }
+    } catch (err) {
+      console.error('Failed to update asset title:', err);
+      alert('Failed to update title: ' + err.message);
+    } finally {
+      setIsUpdatingTitle(false);
+    }
+  };
+
+  const handleAutoPublish = async (req) => {
+    setIsAutoPublishing(true);
+    try {
+      const caption = req.staff_note || req.description || '';
+      
+      const isVideo = req.type?.toLowerCase() === 'video';
+      const mediaUrl = isVideo ? (req.url || '') : (req.url || req.thumbnailUrl || '');
+      const calculatedMediaType = isVideo ? 'video' : 'photo';
+
+      const response = await fetch('http://104.248.151.2:5678/webhook-test/publish-marketing-content', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          caption,
+          platform: 'Facebook',
+          mediaUrl,
+          mediaType: calculatedMediaType,
+        }),
+      });
+
+      if (response.ok) {
+        alert('Successfully triggered auto-publish to Facebook!');
+      } else {
+        const errorText = await response.text();
+        alert('Auto-publish failed: ' + errorText);
+      }
+    } catch (err) {
+      console.error('Auto-publish request error:', err);
+      alert('Error triggering auto-publish: ' + err.message);
+    } finally {
+      setIsAutoPublishing(false);
+    }
   };
 
   const handleUpdateAssetPublishing = (requirementId, platform, field, value) => {
@@ -434,7 +536,7 @@ export default function MarketingContentPage() {
             <span className="text-[10px] text-slate-500 mt-1">Make sure you have projects marked as "Published" or "Done" containing deliverables.</span>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="columns-1 md:columns-2 lg:columns-3 xl:columns-4 gap-6">
             {displayedAssets.map((asset) => {
               // Calculate pending platform count for individual card trigger badges
               const platforms = ['pensala', 'facebook', 'youtube', 'instagram', 'tiktok', 'linkedin'];
@@ -560,15 +662,26 @@ export default function MarketingContentPage() {
                       />
                     </div>
                   </div>
-                  <label className="flex items-center gap-2 text-xs text-[#1F2937] font-semibold cursor-pointer select-none mt-1">
-                    <input
-                      type="checkbox"
-                      checked={req.publishing?.facebook?.boosted || false}
-                      onChange={(e) => handleUpdateAssetPublishing(req.id, 'facebook', 'boosted', e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-300 text-[#109FC6] focus:ring-[#109FC6] cursor-pointer"
-                    />
-                    <span>Boosted (Paid Promotion)</span>
-                  </label>
+                  <div className="flex items-center justify-between gap-3 mt-1">
+                    <label className="flex items-center gap-2 text-xs text-[#1F2937] font-semibold cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={req.publishing?.facebook?.boosted || false}
+                        onChange={(e) => handleUpdateAssetPublishing(req.id, 'facebook', 'boosted', e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-300 text-[#109FC6] focus:ring-[#109FC6] cursor-pointer"
+                      />
+                      <span>Boosted (Paid Promotion)</span>
+                    </label>
+
+                    <button
+                      type="button"
+                      disabled={isAutoPublishing}
+                      onClick={() => handleAutoPublish(req)}
+                      className="px-3 py-1.5 bg-[#109FC6] hover:bg-[#0d82a2] disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-[10px] font-black uppercase rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-sm shrink-0"
+                    >
+                      {isAutoPublishing ? 'Publishing...' : '🚀 Auto-Publish via n8n'}
+                    </button>
+                  </div>
                 </div>
 
                 {/* YouTube */}
@@ -772,9 +885,38 @@ export default function MarketingContentPage() {
                   <span className="text-[9px] uppercase font-extrabold tracking-widest text-[#109FC6]">
                     Asset Details
                   </span>
-                  <h3 className="text-sm font-black text-[#1F2937] truncate max-w-xs mt-0.5">
-                    {req.title}
-                  </h3>
+                  {isEditingTitle ? (
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <input
+                        type="text"
+                        autoFocus
+                        value={editedTitle}
+                        disabled={isUpdatingTitle}
+                        onChange={(e) => setEditedTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleUpdateTitle(editedTitle);
+                          } else if (e.key === 'Escape') {
+                            setIsEditingTitle(false);
+                            setEditedTitle(req.title || '');
+                          }
+                        }}
+                        onBlur={() => handleUpdateTitle(editedTitle)}
+                        className="px-2 py-0.5 text-sm font-black text-[#1F2937] border border-[#109FC6] rounded-lg focus:outline-none focus:ring-1 focus:ring-[#109FC6] bg-white max-w-xs w-full"
+                      />
+                      {isUpdatingTitle && (
+                        <div className="w-3.5 h-3.5 rounded-full border-2 border-[#109FC6] border-t-transparent animate-spin shrink-0" />
+                      )}
+                    </div>
+                  ) : (
+                    <h3 
+                      onClick={() => setIsEditingTitle(true)}
+                      className="text-sm font-black text-[#1F2937] truncate max-w-xs mt-0.5 flex items-center gap-1.5 cursor-pointer hover:underline hover:opacity-70 group"
+                    >
+                      <span>{req.title}</span>
+                      <Pencil className="w-3 h-3 text-[#109FC6] group-hover:text-[#0d82a2] transition-colors shrink-0" />
+                    </h3>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -848,10 +990,11 @@ export default function MarketingContentPage() {
                     <div>
                       {req.url ? (
                         <div className="flex flex-col gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl shadow-sm w-full">
-                          <div className="w-full h-32 rounded-lg border border-slate-200 bg-slate-950 flex flex-col items-center justify-center text-slate-400 font-bold text-xs shrink-0 gap-2">
-                            <span className="text-3xl">🎥</span>
-                            <span>Video Deliverable Uploaded to Drive</span>
-                          </div>
+                          <video
+                            src={req.url}
+                            controls
+                            className="w-full h-auto max-h-64 rounded-lg border border-slate-200 bg-slate-950 shrink-0"
+                          />
                           <div className="flex items-center justify-between gap-3">
                             <div className="flex-1 min-w-0 flex flex-col gap-0.5">
                               <span className="text-[9px] text-emerald-600 font-bold uppercase tracking-wider">
@@ -866,16 +1009,15 @@ export default function MarketingContentPage() {
                                 >
                                   View Video <ExternalLink className="w-3 h-3 shrink-0" />
                                 </a>
-                                {req.webContentLink && (
-                                  <a
-                                    href={req.webContentLink}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
-                                  >
-                                    Download Video <Download className="w-3 h-3 shrink-0" />
-                                  </a>
-                                )}
+                                <a
+                                  href={req.url}
+                                  download
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                                >
+                                  Download Video <Download className="w-3 h-3 shrink-0" />
+                                </a>
                               </div>
                             </div>
                           </div>

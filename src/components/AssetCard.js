@@ -1,5 +1,5 @@
-import React from 'react';
-import { Trash2 } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Trash2, RotateCcw, Play } from 'lucide-react';
 
 export default function AssetCard({
   req,
@@ -11,14 +11,30 @@ export default function AssetCard({
   isMarketingView = false,
   handleDeleteAssetRequirement,
   onUploadEdit,
-  onApprove
+  onApprove,
+  onUnapprove
 }) {
   const isImage = req.type === 'Image';
   const isUploaded = req.status === 'Uploaded' || !!req.url;
   const isApproved = req.isApproved === true;
 
+  const [isPlaying, setIsPlaying] = useState(false);
+  const videoRef = useRef(null);
+
+  const handlePlayClick = (e) => {
+    e.stopPropagation();
+    if (!videoRef.current) return;
+    if (isPlaying) {
+      videoRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      videoRef.current.play();
+      setIsPlaying(true);
+    }
+  };
+
   return (
-    <div className="border border-slate-200 rounded-xl p-5 bg-white shadow-sm flex flex-col gap-4 relative hover:shadow-md transition-shadow duration-200">
+    <div className={`border border-slate-200 rounded-xl p-5 bg-white shadow-sm flex flex-col gap-4 relative hover:shadow-md transition-shadow duration-200 ${isMarketingView ? 'break-inside-avoid mb-6' : ''}`}>
 
       {/* Marketing Project Context Header */}
       {isMarketingView && (projectName || teacherName) && (
@@ -73,6 +89,18 @@ export default function AssetCard({
         </button>
       )}
 
+      {/* Admin Revert/Unapprove Action */}
+      {isAdmin && !isMarketingView && isApproved && onUnapprove && (
+        <button
+          type="button"
+          onClick={() => onUnapprove(req.id)}
+          className="absolute top-4 right-12 p-1.5 bg-slate-50 hover:bg-amber-50 text-slate-400 hover:text-amber-600 rounded-lg transition border border-slate-200 hover:border-amber-100 cursor-pointer shrink-0"
+          title="Revert to Pending"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+        </button>
+      )}
+
       {/* Delivery / Content Section */}
       {isUploaded ? (
         isApproved ? (
@@ -82,16 +110,38 @@ export default function AssetCard({
               <img
                 src={req.url}
                 alt={req.title}
-                className={`w-full object-cover rounded-xl border border-slate-200 bg-slate-950 shrink-0 ${isMarketingView ? 'aspect-square' : 'h-32 md:h-40'}`}
+                className={`w-full rounded-xl border border-slate-200 bg-slate-950 shrink-0 ${isMarketingView ? 'h-auto object-contain' : 'h-32 md:h-40 object-cover'}`}
               />
+            ) : isMarketingView ? (
+              <div className="relative w-full rounded-xl overflow-hidden border border-slate-200 bg-slate-950 group cursor-pointer shrink-0">
+                <video
+                  ref={videoRef}
+                  src={req.url}
+                  controls={isPlaying}
+                  onClick={handlePlayClick}
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => setIsPlaying(false)}
+                  className="w-full h-auto object-contain block rounded-xl"
+                />
+                {!isPlaying && (
+                  <div 
+                    onClick={handlePlayClick}
+                    className="absolute inset-0 flex items-center justify-center bg-black/25 group-hover:bg-black/45 transition-all duration-300 rounded-xl"
+                  >
+                    <div className="w-12 h-12 rounded-full bg-white/90 hover:bg-white text-[#109FC6] flex items-center justify-center shadow-lg transform group-hover:scale-110 transition-transform duration-300">
+                      <Play className="w-5 h-5 fill-[#109FC6] translate-x-0.5" />
+                    </div>
+                  </div>
+                )}
+              </div>
             ) : req.thumbnailUrl ? (
               <img
                 src={req.thumbnailUrl}
                 alt={`${req.title} Thumbnail`}
-                className={`w-full object-cover rounded-xl border border-slate-200 bg-slate-950 shrink-0 ${isMarketingView ? 'aspect-square' : 'h-32 md:h-40'}`}
+                className={`w-full rounded-xl border border-slate-200 bg-slate-950 shrink-0 ${isMarketingView ? 'h-auto object-contain' : 'h-32 md:h-40 object-cover'}`}
               />
             ) : (
-              <div className={`w-full rounded-xl border border-slate-200 bg-slate-950 flex flex-col items-center justify-center text-slate-400 font-bold text-xs shrink-0 gap-2 ${isMarketingView ? 'aspect-square' : 'h-32 md:h-40'}`}>
+              <div className={`w-full rounded-xl border border-slate-200 bg-slate-950 flex flex-col items-center justify-center text-slate-400 font-bold text-xs shrink-0 gap-2 ${isMarketingView ? 'aspect-video' : 'h-32 md:h-40'}`}>
                 <span className="text-3xl">🎥</span>
                 <span>Video Deliverable Uploaded</span>
               </div>

@@ -4,6 +4,7 @@ import { getStageByIdDynamic } from '@/lib/role-config';
 import { useAuth } from '@/lib/AuthContext';
 import { supabase } from '@/lib/supabase';
 import AssetCard from './AssetCard';
+import * as tus from 'tus-js-client';
 
 const getYouTubeId = (url) => {
   if (!url) return null;
@@ -231,6 +232,7 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
   const [newReqDesc, setNewReqDesc] = useState('');
   const [publishingModalAssetId, setPublishingModalAssetId] = useState(null);
   const [isEditingBasicInfo, setIsEditingBasicInfo] = useState(false);
+  const [isAutoPublishing, setIsAutoPublishing] = useState(false);
   const [previewImageUrl, setPreviewImageUrl] = useState(null);
   const [isAddAssetModalOpen, setIsAddAssetModalOpen] = useState(false);
   const [selectedAssetForUpload, setSelectedAssetForUpload] = useState(null);
@@ -395,6 +397,57 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
     }));
   };
 
+  const handleUnapproveAsset = (requirementId) => {
+    setFormData(prev => ({
+      ...prev,
+      asset_requirements: (prev.asset_requirements || []).map(r => {
+        if (r.id === requirementId) {
+          return {
+            ...r,
+            isApproved: false
+          };
+        }
+        return r;
+      })
+    }));
+  };
+
+  const handleAutoPublish = async (req) => {
+    setIsAutoPublishing(true);
+    try {
+      const caption = req.staff_note || req.description || '';
+      
+      const isVideo = req.type?.toLowerCase() === 'video';
+      const mediaUrl = isVideo ? (req.url || '') : (req.url || req.thumbnailUrl || '');
+      const calculatedMediaType = isVideo ? 'video' : 'photo';
+
+      const response = await fetch('http://104.248.151.2:5678/webhook-test/publish-marketing-content', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          caption,
+          platform: 'Facebook',
+          mediaUrl,
+          mediaType: calculatedMediaType,
+        }),
+      });
+
+      if (response.ok) {
+        alert('Successfully triggered auto-publish to Facebook!');
+      } else {
+        const errorText = await response.text();
+        alert('Auto-publish failed: ' + errorText);
+      }
+    } catch (err) {
+      console.error('Auto-publish request error:', err);
+      alert('Error triggering auto-publish: ' + err.message);
+    } finally {
+      setIsAutoPublishing(false);
+    }
+  };
+
   const handleUploadAsset = async (requirementId, file, isThumbnail = false) => {
     if (!file) return;
     setIsUploading(true);
@@ -421,199 +474,6 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
       });
     }
 
-    const reqObj = (formData.asset_requirements || []).find(r => r.id === requirementId);
-    const isVideoFile = reqObj && reqObj.type === 'Video' && !isThumbnail;
-
-    let progressInterval = null;
-    if (isThumbnail) {
-      progressInterval = setInterval(() => {
-        setThumbUpload(prev => {
-          if (prev.progress >= 90) {
-            clearInterval(progressInterval);
-            return {
-              ...prev,
-              progress: 90,
-              statusText: 'Saving to Drive...',
-              timeRemaining: ''
-            };
-          }
-          const nextPercent = prev.progress + 15;
-          if (nextPercent >= 90) {
-            clearInterval(progressInterval);
-            return {
-              ...prev,
-              progress: 90,
-              statusText: 'Saving to Drive...',
-              timeRemaining: ''
-            };
-          }
-          return {
-            ...prev,
-            progress: nextPercent,
-            statusText: 'Uploading...',
-            timeRemaining: `~${Math.round((90 - nextPercent) / 15)} secs remaining`
-          };
-        });
-      }, 100);
-    }
-
-    if (isVideoFile) {
-      try {
-        // 1. Get the resumable upload URL
-        const sessionResponse = await fetch('/api/drive/upload', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            fileName: file.name,
-            fileType: file.type || 'video/mp4',
-            fileSize: file.size
-          }),
-        });
-
-        if (!sessionResponse.ok) {
-          const sessionError = await sessionResponse.json();
-          throw new Error(sessionError.error || 'Failed to initiate upload session');
-        }
-
-        const sessionData = await sessionResponse.json();
-        const { uploadUrl } = sessionData;
-
-        // 2. Upload file directly to Google Drive URL
-        const data = await new Promise((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open('PUT', uploadUrl, true);
-          
-          const startTime = Date.now();
-          
-          xhr.upload.onprogress = (e) => {
-            if (e.lengthComputable) {
-              const loaded = e.loaded;
-              const total = e.total;
-              
-              const percent = Math.round((loaded * 100) / total);
-              let displayPercent = percent;
-              let statusText = 'Uploading...';
-              let timeRemainingText = '';
-              
-              if (percent >= 90) {
-                displayPercent = 90;
-                statusText = 'Saving to Drive...';
-              } else {
-                displayPercent = percent;
-                
-                const elapsedMs = Date.now() - startTime;
-                const speedBps = loaded / (elapsedMs / 1000);
-                if (speedBps > 0) {
-                  const bytesRemaining = total - loaded;
-                  const secondsRemaining = Math.round(bytesRemaining / speedBps);
-                  
-                  if (secondsRemaining > 60) {
-                    const mins = Math.floor(secondsRemaining / 60);
-                    const secs = secondsRemaining % 60;
-                    timeRemainingText = `~${mins} min ${secs} sec remaining`;
-                  } else {
-                    timeRemainingText = `~${secondsRemaining} secs remaining`;
-                  }
-                }
-              }
-              
-              setVideoUpload(prev => ({
-                ...prev,
-                progress: displayPercent,
-                statusText,
-                timeRemaining: timeRemainingText
-              }));
-            }
-          };
-          
-          xhr.onload = () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              try {
-                const resData = JSON.parse(xhr.responseText);
-                resolve(resData);
-              } catch (err) {
-                reject(new Error('Invalid response from Google Drive'));
-              }
-            } else {
-              reject(new Error(`Upload failed with status ${xhr.status}`));
-            }
-          };
-          
-          xhr.onerror = () => {
-            reject(new Error('Network error occurred during upload'));
-          };
-          
-          xhr.onabort = () => {
-            reject(new Error('Upload aborted'));
-          };
-          
-          xhr.send(file);
-        });
-
-        // 3. Make the file public via API
-        const actualFileId = data.id || data.fileId;
-        const webViewLink = data.webViewLink;
-        const webContentLink = data.webContentLink;
-
-        const permResponse = await fetch('/api/drive/upload', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            action: 'permission',
-            fileId: actualFileId
-          }),
-        });
-
-        if (!permResponse.ok) {
-          console.warn('Failed to set public viewing permissions');
-        }
-
-        setVideoUpload(prev => ({
-          ...prev,
-          progress: 100,
-          statusText: 'Upload Complete',
-          timeRemaining: ''
-        }));
-        
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        setFormData(prev => ({
-          ...prev,
-          asset_requirements: (prev.asset_requirements || []).map(r => {
-            if (r.id === requirementId) {
-              return {
-                ...r,
-                url: webViewLink,
-                webContentLink: webContentLink,
-                driveFileId: actualFileId,
-                status: 'Uploaded',
-                isApproved: false
-              };
-            }
-            return r;
-          })
-        }));
-      } catch (err) {
-        console.error('Error uploading video to Google Drive:', err);
-        alert('Google Drive upload failed: ' + (err.message || err));
-      } finally {
-        setIsUploading(false);
-        setVideoUpload({
-          requirementId: null,
-          progress: 0,
-          statusText: 'Uploading...',
-          timeRemaining: '',
-          fileName: '',
-          fileSize: ''
-        });
-      }
-      return;
-    }
-
     try {
       const projectId = project?.id || 'temp';
       const fileExt = file.name.split('.').pop();
@@ -621,91 +481,147 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
       const suffix = isThumbnail ? '_thumb_' : '';
       const filePath = `projects/${projectId}/${requirementId}${suffix}_${Date.now()}_${uniqueId}.${fileExt}`;
 
-      // Upload file
-      const { data, error } = await supabase.storage
-        .from('project-assets')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: true
-        });
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 
-      if (error) throw error;
+      const startTime = Date.now();
 
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('project-assets')
-        .getPublicUrl(filePath);
-
-      const publicUrl = urlData.publicUrl;
-
-      if (progressInterval) clearInterval(progressInterval);
-      
-      if (isThumbnail) {
-        setThumbUpload(prev => ({
-          ...prev,
-          progress: 100,
-          statusText: 'Upload Complete',
-          timeRemaining: ''
-        }));
-      } else {
-        setVideoUpload(prev => ({
-          ...prev,
-          progress: 100,
-          statusText: 'Upload Complete',
-          timeRemaining: ''
-        }));
-      }
-      
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Update state
-      setFormData(prev => ({
-        ...prev,
-        asset_requirements: (prev.asset_requirements || []).map(req => {
-          if (req.id === requirementId) {
-            if (isThumbnail) {
-              return {
-                ...req,
-                thumbnailUrl: publicUrl
-              };
-            } else {
-              return {
-                ...req,
-                url: publicUrl,
-                status: 'Uploaded',
-                isApproved: false
-              };
+      const upload = new tus.Upload(file, {
+        endpoint: `${supabaseUrl}/storage/v1/upload/resumable`,
+        retryDelays: [0, 3000, 5000, 10000, 20000],
+        headers: {
+          Authorization: `Bearer ${token}`,
+          apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+          'x-upsert': 'true'
+        },
+        uploadUrl: localStorage.getItem(`tus_upload_${requirementId}`), // Try to retrieve saved upload url for resuming
+        metadata: {
+          bucketName: 'project-assets',
+          objectName: filePath,
+          contentType: file.type || 'application/octet-stream'
+        },
+        onError: function (error) {
+          console.error("Failed because: " + error);
+          alert("Upload failed: " + error.message + ". We will attempt to resume if you upload the file again.");
+          setIsUploading(false);
+        },
+        onProgress: function (bytesSent, bytesTotal) {
+          const percent = Math.round((bytesSent * 100) / bytesTotal);
+          let displayPercent = percent;
+          let statusText = 'Uploading...';
+          let timeRemainingText = '';
+          
+          if (percent >= 90) {
+            displayPercent = 90;
+            statusText = 'Saving to Storage...';
+          } else {
+            displayPercent = percent;
+            
+            const elapsedMs = Date.now() - startTime;
+            const speedBps = bytesSent / (elapsedMs / 1000);
+            if (speedBps > 0) {
+              const bytesRemaining = bytesTotal - bytesSent;
+              const secondsRemaining = Math.round(bytesRemaining / speedBps);
+              
+              if (secondsRemaining > 60) {
+                const mins = Math.floor(secondsRemaining / 60);
+                const secs = secondsRemaining % 60;
+                timeRemainingText = `~${mins} min ${secs} sec remaining`;
+              } else {
+                timeRemainingText = `~${secondsRemaining} secs remaining`;
+              }
             }
           }
-          return req;
-        })
-      }));
+
+          if (isThumbnail) {
+            setThumbUpload(prev => ({
+              ...prev,
+              progress: displayPercent,
+              statusText,
+              timeRemaining: timeRemainingText
+            }));
+          } else {
+            setVideoUpload(prev => ({
+              ...prev,
+              progress: displayPercent,
+              statusText,
+              timeRemaining: timeRemainingText
+            }));
+          }
+        },
+        onSuccess: async function () {
+          // Clear saved upload url
+          localStorage.removeItem(`tus_upload_${requirementId}`);
+
+          // Get public URL
+          const { data: urlData } = supabase.storage
+            .from('project-assets')
+            .getPublicUrl(filePath);
+
+          const publicUrl = urlData.publicUrl;
+
+          if (isThumbnail) {
+            setThumbUpload(prev => ({
+              ...prev,
+              progress: 100,
+              statusText: 'Upload Complete',
+              timeRemaining: ''
+            }));
+          } else {
+            setVideoUpload(prev => ({
+              ...prev,
+              progress: 100,
+              statusText: 'Upload Complete',
+              timeRemaining: ''
+            }));
+          }
+          
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          setFormData(prev => ({
+            ...prev,
+            asset_requirements: (prev.asset_requirements || []).map(req => {
+              if (req.id === requirementId) {
+                if (isThumbnail) {
+                  return {
+                    ...req,
+                    thumbnailUrl: publicUrl
+                  };
+                } else {
+                  return {
+                    ...req,
+                    url: publicUrl,
+                    status: 'Uploaded',
+                    isApproved: false
+                  };
+                }
+              }
+              return req;
+            })
+          }));
+          setIsUploading(false);
+        }
+      });
+
+      // Save upload url on creation or progress
+      upload.findPreviousUploads().then(function (previousUploads) {
+        if (previousUploads.length) {
+          upload.resumeFromPreviousUpload(previousUploads[0]);
+        }
+        
+        upload.start();
+        
+        // Save the upload url for manual persistence
+        if (upload.url) {
+          localStorage.setItem(`tus_upload_${requirementId}`, upload.url);
+        }
+      });
+
     } catch (err) {
-      console.error('Error uploading asset:', err);
+      console.error('Error uploading file to Supabase:', err);
       alert('Upload failed: ' + (err.message || err));
-    } finally {
-      if (progressInterval) clearInterval(progressInterval);
       setIsUploading(false);
-      
-      if (isThumbnail) {
-        setThumbUpload({
-          requirementId: null,
-          progress: 0,
-          statusText: 'Uploading...',
-          timeRemaining: '',
-          fileName: '',
-          fileSize: ''
-        });
-      } else {
-        setVideoUpload({
-          requirementId: null,
-          progress: 0,
-          statusText: 'Uploading...',
-          timeRemaining: '',
-          fileName: '',
-          fileSize: ''
-        });
-      }
     }
   };
 
@@ -2217,6 +2133,7 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                                 onUploadEditLabel="View / Edit Asset"
                                 handleDeleteAssetRequirement={handleDeleteAssetRequirement}
                                 setPublishingModalAssetId={setPublishingModalAssetId}
+                                onUnapprove={handleUnapproveAsset}
                               />
                             ))}
                           </div>
@@ -2250,6 +2167,7 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                                 onUploadEditLabel="View / Edit Asset"
                                 handleDeleteAssetRequirement={handleDeleteAssetRequirement}
                                 setPublishingModalAssetId={setPublishingModalAssetId}
+                                onUnapprove={handleUnapproveAsset}
                               />
                             ))}
                           </div>
@@ -2402,15 +2320,26 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                         />
                       </div>
                     </div>
-                    <label className="flex items-center gap-2 text-xs text-[#1F2937] font-semibold cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={req.publishing?.facebook?.boosted || false}
-                        onChange={(e) => handleUpdateAssetPublishing(req.id, 'facebook', 'boosted', e.target.checked)}
-                        className="w-4 h-4 rounded border-slate-300 text-[#109FC6] focus:ring-[#109FC6] cursor-pointer"
-                      />
-                      <span>Boosted (Paid Promotion)</span>
-                    </label>
+                    <div className="flex items-center justify-between gap-3 mt-1">
+                      <label className="flex items-center gap-2 text-xs text-[#1F2937] font-semibold cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={req.publishing?.facebook?.boosted || false}
+                          onChange={(e) => handleUpdateAssetPublishing(req.id, 'facebook', 'boosted', e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-300 text-[#109FC6] focus:ring-[#109FC6] cursor-pointer"
+                        />
+                        <span>Boosted (Paid Promotion)</span>
+                      </label>
+
+                      <button
+                        type="button"
+                        disabled={isAutoPublishing}
+                        onClick={() => handleAutoPublish(req)}
+                        className="px-3 py-1.5 bg-[#109FC6] hover:bg-[#0d82a2] disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-[10px] font-black uppercase rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-sm shrink-0"
+                      >
+                        {isAutoPublishing ? 'Publishing...' : '🚀 Auto-Publish via n8n'}
+                      </button>
+                    </div>
                   </div>
 
                   {/* YouTube */}
@@ -2922,10 +2851,11 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                             </div>
                           ) : isUploaded ? (
                             <div className="flex flex-col gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl shadow-sm">
-                              <div className="w-full h-32 rounded-lg border border-slate-200 bg-slate-950 flex flex-col items-center justify-center text-slate-400 font-bold text-xs shrink-0 gap-2">
-                                <span className="text-3xl">🎥</span>
-                                <span>Video Deliverable Uploaded to Drive</span>
-                              </div>
+                              <video
+                                src={req.url}
+                                controls
+                                className="w-full h-auto max-h-64 rounded-lg border border-slate-200 bg-slate-950 shrink-0"
+                              />
                               <div className="flex items-center justify-between gap-3">
                                 <div className="flex-1 min-w-0 flex flex-col gap-0.5">
                                   <span className="text-[9px] text-emerald-600 font-bold uppercase tracking-wider">
@@ -2940,16 +2870,15 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                                     >
                                       View Video <ExternalLink className="w-3 h-3 shrink-0" />
                                     </a>
-                                    {req.webContentLink && (
-                                      <a
-                                        href={req.webContentLink}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
-                                      >
-                                        Download Video <Download className="w-3 h-3 shrink-0" />
-                                      </a>
-                                    )}
+                                    <a
+                                      href={req.url}
+                                      download
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                                    >
+                                      Download Video <Download className="w-3 h-3 shrink-0" />
+                                    </a>
                                   </div>
                                 </div>
                                 <button
