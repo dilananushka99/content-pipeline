@@ -1,6 +1,39 @@
 import React, { useState, useRef } from 'react';
 import { Trash2, RotateCcw, Play } from 'lucide-react';
 
+const parseAspectRatio = (specs) => {
+  if (!specs) return null;
+  const s = specs.toLowerCase().trim();
+  
+  // Try to match "W:H" or "W/H" formats (e.g. 16:9, 9:16, 1:1, 4:5)
+  const ratioMatch = s.match(/(\d+)\s*[:/]\s*(\d+)/);
+  if (ratioMatch) {
+    return `${ratioMatch[1]}/${ratioMatch[2]}`;
+  }
+  
+  // Try to match resolution formats "WxH" (e.g. 1920x1080, 1080x1920)
+  const resMatch = s.match(/(\d+)\s*x\s*(\d+)/);
+  if (resMatch) {
+    return `${resMatch[1]}/${resMatch[2]}`;
+  }
+  
+  // Check for common names or shorthands
+  if (s.includes('1080p') || s.includes('youtube') || s.includes('landscape') || s.includes('16:9')) {
+    return '16/9';
+  }
+  if (s.includes('reel') || s.includes('tiktok') || s.includes('shorts') || s.includes('portrait') || s.includes('9:16')) {
+    return '9/16';
+  }
+  if (s.includes('square') || s.includes('1:1')) {
+    return '1/1';
+  }
+  if (s.includes('4:5') || s.includes('post')) {
+    return '4/5';
+  }
+  
+  return null;
+};
+
 export default function AssetCard({
   req,
   projectName,
@@ -17,6 +50,7 @@ export default function AssetCard({
   const isImage = req.type === 'Image';
   const isUploaded = req.status === 'Uploaded' || !!req.url;
   const isApproved = req.isApproved === true;
+  const parsedRatio = parseAspectRatio(req.specs);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const videoRef = useRef(null);
@@ -34,7 +68,7 @@ export default function AssetCard({
   };
 
   return (
-    <div className={`border border-slate-200 rounded-xl p-5 bg-white shadow-sm flex flex-col gap-4 relative hover:shadow-md transition-shadow duration-200 ${isMarketingView ? 'break-inside-avoid mb-6' : ''}`}>
+    <div className={`border border-slate-200 rounded-xl p-5 bg-white shadow-sm flex flex-col gap-4 relative hover:shadow-md transition-shadow duration-200 break-inside-avoid h-fit ${isMarketingView ? 'mb-6' : 'mb-4'}`}>
 
       {/* Marketing Project Context Header */}
       {isMarketingView && (projectName || teacherName) && (
@@ -110,7 +144,8 @@ export default function AssetCard({
               <img
                 src={req.url}
                 alt={req.title}
-                className={`w-full rounded-xl border border-slate-200 bg-slate-950 shrink-0 ${isMarketingView ? 'h-auto object-contain' : 'h-32 md:h-40 object-cover'}`}
+                className="w-full rounded-xl border border-slate-200 bg-slate-950 shrink-0 object-cover"
+                style={isMarketingView ? { height: 'auto', objectFit: 'contain' } : { aspectRatio: parsedRatio || '16/9' }}
               />
             ) : isMarketingView ? (
               <div className="relative w-full rounded-xl overflow-hidden border border-slate-200 bg-slate-950 group cursor-pointer shrink-0">
@@ -138,10 +173,14 @@ export default function AssetCard({
               <img
                 src={req.thumbnailUrl}
                 alt={`${req.title} Thumbnail`}
-                className={`w-full rounded-xl border border-slate-200 bg-slate-950 shrink-0 ${isMarketingView ? 'h-auto object-contain' : 'h-32 md:h-40 object-cover'}`}
+                className="w-full rounded-xl border border-slate-200 bg-slate-950 shrink-0 object-cover"
+                style={isMarketingView ? { height: 'auto', objectFit: 'contain' } : { aspectRatio: parsedRatio || '16/9' }}
               />
             ) : (
-              <div className={`w-full rounded-xl border border-slate-200 bg-slate-950 flex flex-col items-center justify-center text-slate-400 font-bold text-xs shrink-0 gap-2 ${isMarketingView ? 'aspect-video' : 'h-32 md:h-40'}`}>
+              <div 
+                className="w-full rounded-xl border border-slate-200 bg-slate-950 flex flex-col items-center justify-center text-slate-400 font-bold text-xs shrink-0 gap-2"
+                style={isMarketingView ? { aspectRatio: '16/9' } : { aspectRatio: parsedRatio || '16/9' }}
+              >
                 <span className="text-3xl">🎥</span>
                 <span>Video Deliverable Uploaded</span>
               </div>
@@ -164,16 +203,21 @@ export default function AssetCard({
               <img
                 src={req.url}
                 alt={req.title}
-                className="w-full h-32 md:h-40 object-cover rounded-xl border border-slate-200 bg-slate-950 shrink-0"
+                className="w-full object-cover rounded-xl border border-slate-200 bg-slate-950 shrink-0"
+                style={{ aspectRatio: parsedRatio || '16/9' }}
               />
             ) : req.thumbnailUrl ? (
               <img
                 src={req.thumbnailUrl}
                 alt={`${req.title} Thumbnail`}
-                className="w-full h-32 md:h-40 object-cover rounded-xl border border-slate-200 bg-slate-950 shrink-0"
+                className="w-full object-cover rounded-xl border border-slate-200 bg-slate-950 shrink-0"
+                style={{ aspectRatio: parsedRatio || '16/9' }}
               />
             ) : (
-              <div className="w-full h-32 md:h-40 rounded-xl border border-slate-200 bg-slate-950 flex flex-col items-center justify-center text-slate-400 font-bold text-xs shrink-0 gap-2">
+              <div 
+                className="w-full rounded-xl border border-slate-200 bg-slate-950 flex flex-col items-center justify-center text-slate-400 font-bold text-xs shrink-0 gap-2"
+                style={{ aspectRatio: parsedRatio || '16/9' }}
+              >
                 <span className="text-3xl">🎥</span>
                 <span>Video Deliverable Uploaded</span>
               </div>
@@ -208,8 +252,14 @@ export default function AssetCard({
       ) : (
         /* Pending Upload Layout */
         <div className="flex flex-col gap-4 pt-3 border-t border-slate-100">
-          {/* Tall Placeholder Box */}
-          <div className="flex items-center justify-center min-h-[120px] rounded-xl border border-dashed border-slate-200 bg-slate-50 text-slate-400 text-[10px] font-black uppercase tracking-wider select-none">
+          {/* Dynamic Aspect Ratio Placeholder Box */}
+          <div 
+            className="flex items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 text-slate-400 text-[10px] font-black uppercase tracking-wider select-none w-full"
+            style={{ 
+              aspectRatio: parsedRatio || '16/9',
+              minHeight: '120px'
+            }}
+          >
             No Asset Uploaded Yet
           </div>
 

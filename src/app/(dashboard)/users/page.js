@@ -17,8 +17,8 @@ import {
   ClipboardList,
   CheckCircle,
   XCircle,
-  X,
-  Megaphone
+  Megaphone,
+  Clock
 } from 'lucide-react';
 
 export default function UsersDirectoryPage() {
@@ -27,15 +27,9 @@ export default function UsersDirectoryPage() {
 
   const [users, setUsers] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('teachers'); // 'teachers' | 'staff' | 'marketing' | 'admins'
+  const [activeTab, setActiveTab] = useState('teachers'); // 'teachers' | 'staff' | 'marketing' | 'admins' | 'pending'
   const [isLoading, setIsLoading] = useState(true);
   const [isUsingSandbox, setIsUsingSandbox] = useState(!isSupabaseConfigured);
-  const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
-  const [newUserFullName, setNewUserFullName] = useState('');
-  const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserContactNumber, setNewUserContactNumber] = useState('');
-  const [newUserRole, setNewUserRole] = useState('Teacher');
-  const [isCreatingUser, setIsCreatingUser] = useState(false);
 
   // Fetch users with robust fallback
   const fetchUsers = async () => {
@@ -104,31 +98,39 @@ export default function UsersDirectoryPage() {
 
   // Compute metric stats
   const stats = useMemo(() => {
-    const teachers = resolvedUsers.filter(u => u.role.toLowerCase() === 'teacher').length;
-    const staff = resolvedUsers.filter(u => u.role.toLowerCase() === 'staff').length;
-    const marketing = resolvedUsers.filter(u => u.role.toLowerCase() === 'staff (marketing)').length;
-    const admins = resolvedUsers.filter(u => u.role.toLowerCase() === 'admin').length;
-    const total = resolvedUsers.length;
+    const approvedUsers = resolvedUsers.filter(u => u.is_approved);
+    const teachers = approvedUsers.filter(u => u.role.toLowerCase() === 'teacher').length;
+    const staff = approvedUsers.filter(u => u.role.toLowerCase() === 'staff').length;
+    const marketing = approvedUsers.filter(u => u.role.toLowerCase() === 'staff (marketing)').length;
+    const admins = approvedUsers.filter(u => u.role.toLowerCase() === 'admin').length;
+    const pending = resolvedUsers.filter(u => !u.is_approved).length;
+    const total = approvedUsers.length;
     
-    return { teachers, staff, marketing, admins, total };
+    return { teachers, staff, marketing, admins, pending, total };
   }, [resolvedUsers]);
 
   // Filter users based on query and active tab selection
   const filteredUsers = useMemo(() => {
     return resolvedUsers.filter(u => {
       // 1. Role tab filter
-      const roleLower = u.role.toLowerCase();
-      if (activeTab === 'teachers' && roleLower !== 'teacher') {
-        return false;
-      }
-      if (activeTab === 'staff' && roleLower !== 'staff') {
-        return false;
-      }
-      if (activeTab === 'marketing' && roleLower !== 'staff (marketing)') {
-        return false;
-      }
-      if (activeTab === 'admins' && roleLower !== 'admin') {
-        return false;
+      if (activeTab === 'pending') {
+        if (u.is_approved) return false;
+      } else {
+        if (!u.is_approved) return false;
+        
+        const roleLower = u.role.toLowerCase();
+        if (activeTab === 'teachers' && roleLower !== 'teacher') {
+          return false;
+        }
+        if (activeTab === 'staff' && roleLower !== 'staff') {
+          return false;
+        }
+        if (activeTab === 'marketing' && roleLower !== 'staff (marketing)') {
+          return false;
+        }
+        if (activeTab === 'admins' && roleLower !== 'admin') {
+          return false;
+        }
       }
 
       // 2. Search query filter
@@ -176,62 +178,27 @@ export default function UsersDirectoryPage() {
     }
   };
 
-  const handleCreateUser = async (e) => {
-    e.preventDefault();
-    if (!newUserFullName.trim() || !newUserEmail.trim()) {
-      alert('Full Name and Email are required.');
-      return;
-    }
-
-    setIsCreatingUser(true);
-    const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11);
-    const payload = {
-      id: newId,
-      email: newUserEmail.trim(),
-      full_name: newUserFullName.trim(),
-      contact_number: newUserContactNumber.trim(),
-      role: newUserRole,
-      is_approved: true, // Manually onboarded users are auto-approved
-      is_active: true
-    };
-
-    if (isUsingSandbox) {
-      const mockUsers = JSON.parse(localStorage.getItem('mock_auth_users') || '[]');
-      const updatedUsers = [...mockUsers, payload];
-      localStorage.setItem('mock_auth_users', JSON.stringify(updatedUsers));
-      setUsers(updatedUsers);
-      window.dispatchEvent(new Event('mock-db-updated'));
-      
-      setNewUserFullName('');
-      setNewUserEmail('');
-      setNewUserContactNumber('');
-      setNewUserRole('Teacher');
-      setIsAddUserModalOpen(false);
-      alert('User onboarded successfully!');
-      setIsCreatingUser(false);
-      return;
-    }
-
+  // Handle rejecting a registration request (deleting the record)
+  const handleRejectUser = async (userId) => {
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .insert([payload]);
-
-      if (error) throw error;
-
-      await fetchUsers();
-
-      setNewUserFullName('');
-      setNewUserEmail('');
-      setNewUserContactNumber('');
-      setNewUserRole('Teacher');
-      setIsAddUserModalOpen(false);
-      alert('User onboarded successfully!');
+      if (isUsingSandbox) {
+        const mockUsers = JSON.parse(localStorage.getItem('mock_auth_users') || '[]');
+        const nextUsers = mockUsers.filter(item => item.id !== userId);
+        localStorage.setItem('mock_auth_users', JSON.stringify(nextUsers));
+        setUsers(nextUsers);
+        window.dispatchEvent(new Event('mock-db-updated'));
+      } else {
+        const { error } = await supabase
+          .from('profiles')
+          .delete()
+          .eq('id', userId);
+        if (error) throw error;
+        await fetchUsers();
+      }
+      alert('User registration rejected.');
     } catch (err) {
-      console.error('Error inserting user to Supabase:', err);
-      alert('Failed to save user: ' + err.message);
-    } finally {
-      setIsCreatingUser(false);
+      console.error('Failed to reject user:', err);
+      alert('Error rejecting user profile.');
     }
   };
 
@@ -303,12 +270,18 @@ export default function UsersDirectoryPage() {
             )}
           </div>
 
-          <button
-            onClick={() => setIsAddUserModalOpen(true)}
-            className="flex items-center justify-center gap-1.5 py-2 px-4 bg-[#109FC6] hover:bg-[#0d82a2] text-white text-xs font-bold uppercase tracking-wider rounded-xl transition shadow-md shadow-[#109FC6]/15 hover:scale-[1.01] cursor-pointer shrink-0"
-          >
-            <span>+ Add User</span>
-          </button>
+          {isAdmin && (
+            <button
+              onClick={() => setActiveTab(activeTab === 'pending' ? 'teachers' : 'pending')}
+              className={`flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl transition shadow-md hover:scale-[1.01] cursor-pointer shrink-0 text-xs font-bold uppercase tracking-wider ${
+                activeTab === 'pending'
+                  ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/15'
+                  : 'bg-[#109FC6] hover:bg-[#0d82a2] text-white shadow-[#109FC6]/15'
+              }`}
+            >
+              <span>⏳ Pending Approvals ({stats.pending})</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -353,7 +326,7 @@ export default function UsersDirectoryPage() {
               <Users className="w-5 h-5 text-[#109FC6]" />
             </div>
             <div className="flex flex-col">
-              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Total Accounts</span>
+              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Total Active</span>
               <h3 className="text-xl font-black text-[#1F2937] leading-none mt-1">{stats.total}</h3>
             </div>
           </div>
@@ -450,6 +423,19 @@ export default function UsersDirectoryPage() {
                 <ShieldAlert className="w-4 h-4" />
                 <span>Administrators ({stats.admins})</span>
               </button>
+              {isAdmin && (
+                <button
+                  onClick={() => setActiveTab('pending')}
+                  className={`py-4 px-4 text-xs font-bold tracking-wider uppercase border-b-2 cursor-pointer transition flex items-center gap-2 ${
+                    activeTab === 'pending'
+                      ? 'border-amber-500 text-amber-600'
+                      : 'border-transparent text-slate-500 hover:text-[#1F2937]'
+                  }`}
+                >
+                  <Clock className="w-4 h-4" />
+                  <span>Pending Approvals ({stats.pending})</span>
+                </button>
+              )}
             </div>
             
             <div className="text-xs text-slate-400 font-semibold italic flex items-center gap-1.5 select-none">
@@ -497,14 +483,14 @@ export default function UsersDirectoryPage() {
                           <div className="flex flex-col">
                             <div className="flex items-center">
                               <span className="font-bold text-[#1F2937]">{u.name}</span>
-                              {!u.is_active && (
-                                <span className="inline-flex items-center ml-2 px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-100 text-rose-700 border border-rose-200 uppercase tracking-wider select-none animate-pulse">
-                                  Inactive
-                                </span>
-                              )}
-                              {u.is_active && !u.is_approved && (
+                              {!u.is_approved && (
                                 <span className="inline-flex items-center ml-2 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-50 text-amber-700 border border-amber-200 uppercase tracking-wider animate-pulse select-none">
                                   Pending
+                                </span>
+                              )}
+                              {u.is_approved && !u.is_active && (
+                                <span className="inline-flex items-center ml-2 px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-100 text-rose-700 border border-rose-200 uppercase tracking-wider select-none animate-pulse">
+                                  Inactive
                                 </span>
                               )}
                             </div>
@@ -529,49 +515,59 @@ export default function UsersDirectoryPage() {
                       </td>
                       {isAdmin && (
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center gap-2.5">
-                            {!u.is_approved && (
+                          {activeTab === 'pending' ? (
+                            <div className="flex items-center gap-2.5">
                               <button
-                                onClick={() => handleUpdateUserProfile(u.id, { is_approved: true })}
-                                className="flex items-center gap-1 px-2.5 py-1 bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] text-white text-xs font-bold uppercase rounded-lg shadow-sm transition cursor-pointer"
+                                onClick={() => handleUpdateUserProfile(u.id, { is_approved: true, is_active: true })}
+                                className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs font-bold uppercase rounded-lg shadow-sm transition cursor-pointer"
                                 title="Approve User Account"
                               >
                                 <CheckCircle className="w-3.5 h-3.5" />
                                 <span>Approve</span>
                               </button>
-                            )}
-                            
-                            {u.is_active ? (
                               <button
-                                onClick={() => handleUpdateUserProfile(u.id, { is_active: false })}
-                                className="flex items-center gap-1 px-2.5 py-1 bg-rose-50 hover:bg-rose-100 active:scale-[0.98] text-rose-700 text-xs font-bold uppercase rounded-lg border border-rose-200/80 transition cursor-pointer"
-                                title="Deactivate User"
+                                onClick={() => handleRejectUser(u.id)}
+                                className="flex items-center gap-1 px-2.5 py-1 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white text-xs font-bold uppercase rounded-lg shadow-sm transition cursor-pointer"
+                                title="Reject User Account"
                               >
                                 <XCircle className="w-3.5 h-3.5" />
-                                <span>Deactivate</span>
+                                <span>Reject</span>
                               </button>
-                            ) : (
-                              <button
-                                onClick={() => handleUpdateUserProfile(u.id, { is_active: true })}
-                                className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 active:scale-[0.98] text-emerald-700 text-xs font-bold uppercase rounded-lg border border-emerald-200/80 transition cursor-pointer"
-                                title="Activate User"
-                              >
-                                <CheckCircle className="w-3.5 h-3.5" />
-                                <span>Activate</span>
-                              </button>
-                            )}
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2.5">
+                              {u.is_active ? (
+                                <button
+                                  onClick={() => handleUpdateUserProfile(u.id, { is_active: false })}
+                                  className="flex items-center gap-1 px-2.5 py-1 bg-rose-50 hover:bg-rose-100 active:scale-[0.98] text-rose-700 text-xs font-bold uppercase rounded-lg border border-rose-200/80 transition cursor-pointer"
+                                  title="Deactivate User"
+                                >
+                                  <XCircle className="w-3.5 h-3.5" />
+                                  <span>Deactivate</span>
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleUpdateUserProfile(u.id, { is_active: true })}
+                                  className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 active:scale-[0.98] text-emerald-700 text-xs font-bold uppercase rounded-lg border border-emerald-200/80 transition cursor-pointer"
+                                  title="Activate User"
+                                >
+                                  <CheckCircle className="w-3.5 h-3.5" />
+                                  <span>Activate</span>
+                                </button>
+                              )}
 
-                            <select
-                              value={u.role}
-                              onChange={(e) => handleUpdateUserProfile(u.id, { role: e.target.value })}
-                              className="dash-input py-1 px-2.5 rounded-lg text-xs cursor-pointer bg-slate-50 border border-slate-200 text-[#1F2937] font-bold"
-                            >
-                              <option value="Teacher">Teacher</option>
-                              <option value="Staff">Staff</option>
-                              <option value="Staff (Marketing)">Staff (Marketing)</option>
-                              <option value="Admin">Admin</option>
-                            </select>
-                          </div>
+                              <select
+                                value={u.role}
+                                onChange={(e) => handleUpdateUserProfile(u.id, { role: e.target.value })}
+                                className="dash-input py-1 px-2.5 rounded-lg text-xs cursor-pointer bg-slate-50 border border-slate-200 text-[#1F2937] font-bold"
+                              >
+                                <option value="Teacher">Teacher</option>
+                                <option value="Staff">Staff</option>
+                                <option value="Staff (Marketing)">Staff (Marketing)</option>
+                                <option value="Admin">Admin</option>
+                              </select>
+                            </div>
+                          )}
                         </td>
                       )}
                     </tr>
@@ -583,122 +579,7 @@ export default function UsersDirectoryPage() {
 
         </div>
 
-      {/* Add New User Modal Overlay */}
-      {isAddUserModalOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overflow-y-auto">
-          <div className="relative w-full max-w-md rounded-2xl border border-slate-200 shadow-2xl flex flex-col bg-white overflow-hidden max-h-[90vh]">
-            
-            {/* Header */}
-            <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-white shrink-0">
-              <div className="flex flex-col">
-                <span className="text-[9px] uppercase font-extrabold tracking-widest text-[#109FC6]">
-                  Onboard Account
-                </span>
-                <h3 className="text-md font-black text-[#1F2937] mt-0.5">
-                  Add New User Profile
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsAddUserModalOpen(false)}
-                className="p-1 rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 transition cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Form */}
-            <form onSubmit={handleCreateUser} className="flex flex-col min-h-0">
-              <div className="p-6 overflow-y-auto flex flex-col gap-4">
-                
-                {/* Full Name */}
-                <div className="flex flex-col gap-1.5 w-full">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Full Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newUserFullName}
-                    onChange={(e) => setNewUserFullName(e.target.value)}
-                    placeholder="Enter full name..."
-                    className="dash-input px-3.5 py-2.5 rounded-xl text-sm w-full border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#109FC6]/30 focus:border-[#109FC6] shadow-sm transition-all"
-                  />
-                </div>
-
-                {/* Email Contact */}
-                <div className="flex flex-col gap-1.5 w-full">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Email Contact
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={newUserEmail}
-                    onChange={(e) => setNewUserEmail(e.target.value)}
-                    placeholder="name@example.com"
-                    className="dash-input px-3.5 py-2.5 rounded-xl text-sm w-full border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#109FC6]/30 focus:border-[#109FC6] shadow-sm transition-all"
-                  />
-                </div>
-
-                {/* Contact Number */}
-                <div className="flex flex-col gap-1.5 w-full">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Contact Number
-                  </label>
-                  <input
-                    type="text"
-                    value={newUserContactNumber}
-                    onChange={(e) => setNewUserContactNumber(e.target.value)}
-                    placeholder="+94 77 123 4567"
-                    className="dash-input px-3.5 py-2.5 rounded-xl text-sm w-full border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#109FC6]/30 focus:border-[#109FC6] shadow-sm transition-all"
-                  />
-                </div>
-
-                {/* Access Role */}
-                <div className="flex flex-col gap-1.5 w-full">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Access Role
-                  </label>
-                  <select
-                    value={newUserRole}
-                    onChange={(e) => setNewUserRole(e.target.value)}
-                    className="dash-input px-3.5 py-2.5 rounded-xl text-sm w-full border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#109FC6]/30 focus:border-[#109FC6] shadow-sm transition-all cursor-pointer font-bold text-slate-700"
-                  >
-                    <option value="Teacher">Teacher (Instructor)</option>
-                    <option value="Staff">Staff (Media Coordinator)</option>
-                    <option value="Staff (Marketing)">Staff (Marketing)</option>
-                    <option value="Admin">Admin (Director)</option>
-                  </select>
-                </div>
-
-              </div>
-
-              {/* Action Footer */}
-              <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setIsAddUserModalOpen(false)}
-                  disabled={isCreatingUser}
-                  className="px-4 py-2 text-xs font-bold uppercase text-slate-600 hover:text-[#1F2937] border border-slate-200 hover:border-slate-300 bg-white rounded-xl transition cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isCreatingUser || !newUserFullName.trim() || !newUserEmail.trim()}
-                  className="flex items-center justify-center px-5 py-2 text-xs font-bold uppercase text-white bg-[#109FC6] hover:bg-[#0d82a2] disabled:bg-[#109FC6]/50 rounded-xl transition cursor-pointer shadow-lg shadow-[#109FC6]/15"
-                >
-                  {isCreatingUser ? 'Saving...' : 'Save User'}
-                </button>
-              </div>
-            </form>
-
-          </div>
-        </div>
-      )}
-
+      </div>
     </div>
-  </div>
   );
 }

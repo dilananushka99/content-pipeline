@@ -3,6 +3,7 @@ import { X, Calendar, User, Phone, MapPin, Shirt, FileText, Link2, Video, CheckC
 import { getStageByIdDynamic } from '@/lib/role-config';
 import { useAuth } from '@/lib/AuthContext';
 import { supabase } from '@/lib/supabase';
+import * as tus from 'tus-js-client';
 import AssetCard from './AssetCard';
 
 const getYouTubeId = (url) => {
@@ -235,6 +236,7 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
   const [previewImageUrl, setPreviewImageUrl] = useState(null);
   const [isAddAssetModalOpen, setIsAddAssetModalOpen] = useState(false);
   const [selectedAssetForUpload, setSelectedAssetForUpload] = useState(null);
+  const [editingAssetTitle, setEditingAssetTitle] = useState('');
   const [isEditingLogistics, setIsEditingLogistics] = useState(false);
   const [isEditingStaff, setIsEditingStaff] = useState(false);
   const [isEditingRoadmap, setIsEditingRoadmap] = useState(false);
@@ -349,6 +351,14 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [previewImageUrl, isAddAssetModalOpen, selectedAssetForUpload]);
+
+  useEffect(() => {
+    if (selectedAssetForUpload) {
+      setEditingAssetTitle(selectedAssetForUpload.title || '');
+    } else {
+      setEditingAssetTitle('');
+    }
+  }, [selectedAssetForUpload]);
 
   if (!isOpen) return null;
 
@@ -476,38 +486,69 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
     try {
       const projectId = project?.id || 'temp';
       const fileExt = file.name.split('.').pop();
-      const uniqueId = Math.random().toString(36).substring(2, 6);
-      const suffix = isThumbnail ? '_thumb_' : '';
-      const filePath = `projects/${projectId}/${requirementId}${suffix}_${Date.now()}_${uniqueId}.${fileExt}`;
+      const suffix = isThumbnail ? '_thumb' : '';
+      const filePath = `projects/${projectId}/${requirementId}${suffix}.${fileExt}`;
 
-      // Upload file directly to Supabase Storage with progress tracking
+      // Get the active session token for authorization
+      let token = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          token = session.access_token;
+        }
+      } catch (err) {
+        console.warn('Failed to retrieve active session token, using anon key:', err);
+      }
+
+      const uploadUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/upload/resumable`;
+      const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/project-assets/${filePath}`;
+
+      const startTime = Date.now();
+
+      // Upload file via Tus-JS-Client with progress tracking and resumable support
       await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        const uploadUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/project-assets/${filePath}`;
-        xhr.open('POST', uploadUrl, true);
-        
-        const startTime = Date.now();
-        
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) {
-            const loaded = e.loaded;
-            const total = e.total;
-            
-            const percent = Math.round((loaded * 100) / total);
+        const upload = new tus.Upload(file, {
+          endpoint: uploadUrl,
+          retryDelays: [0, 3000, 5000, 10000, 20000],
+          headers: {
+            Authorization: `Bearer ${token}`,
+            apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+          },
+          uploadDataDuringCreation: true,
+          removeFingerprintOnSuccess: true,
+          metadata: {
+            bucketName: 'project-assets',
+            objectName: filePath,
+            contentType: file.type || 'application/octet-stream'
+          },
+          onError: (error) => {
+            console.error('Tus upload error:', error);
+            const statusText = 'Network dropped. Retrying...';
+            if (isThumbnail) {
+              setThumbUpload(prev => ({ ...prev, statusText }));
+            } else {
+              setVideoUpload(prev => ({ ...prev, statusText }));
+            }
+            // Manually trigger a retry start after 3 seconds
+            setTimeout(() => {
+              upload.start();
+            }, 3000);
+          },
+          onProgress: (bytesUploaded, bytesTotal) => {
+            const percent = Math.round((bytesUploaded * 100) / bytesTotal);
             let displayPercent = percent;
             let statusText = 'Uploading...';
             let timeRemainingText = '';
             
-            if (percent >= 90) {
-              displayPercent = 90;
+            if (percent >= 99) {
+              displayPercent = 99;
               statusText = 'Saving to Storage...';
             } else {
               displayPercent = percent;
-              
               const elapsedMs = Date.now() - startTime;
-              const speedBps = loaded / (elapsedMs / 1000);
+              const speedBps = bytesUploaded / (elapsedMs / 1000);
               if (speedBps > 0) {
-                const bytesRemaining = total - loaded;
+                const bytesRemaining = bytesTotal - bytesUploaded;
                 const secondsRemaining = Math.round(bytesRemaining / speedBps);
                 
                 if (secondsRemaining > 60) {
@@ -519,7 +560,7 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                 }
               }
             }
-            
+
             if (isThumbnail) {
               setThumbUpload(prev => ({
                 ...prev,
@@ -535,42 +576,23 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                 timeRemaining: timeRemainingText
               }));
             }
+          },
+          onSuccess: () => {
+            resolve();
           }
-        };
-        
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              const resData = JSON.parse(xhr.responseText);
-              resolve(resData);
-            } catch (err) {
-              reject(new Error('Invalid response from Supabase Storage'));
-            }
-          } else {
-            reject(new Error(`Upload failed with status ${xhr.status}`));
+        });
+
+        // Resume from previous upload if exists
+        upload.findPreviousUploads().then((previousUploads) => {
+          if (previousUploads.length > 0) {
+            upload.resumeFromPreviousUpload(previousUploads[0]);
           }
-        };
-        
-        xhr.onerror = () => {
-          reject(new Error('Network error occurred during upload'));
-        };
-        
-        xhr.onabort = () => {
-          reject(new Error('Upload aborted'));
-        };
-        
-        xhr.setRequestHeader('Authorization', `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`);
-        xhr.setRequestHeader('apikey', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
-        xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-        xhr.send(file);
+          upload.start();
+        }).catch((err) => {
+          console.warn('Failed to find previous uploads, starting fresh:', err);
+          upload.start();
+        });
       });
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('project-assets')
-        .getPublicUrl(filePath);
-
-      const publicUrl = urlData.publicUrl;
 
       if (isThumbnail) {
         setThumbUpload(prev => ({
@@ -590,28 +612,42 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
       
       await new Promise(resolve => setTimeout(resolve, 1000));
 
+      const nextRequirements = (formData.asset_requirements || []).map(req => {
+        if (req.id === requirementId) {
+          if (isThumbnail) {
+            return {
+              ...req,
+              thumbnailUrl: publicUrl
+            };
+          } else {
+            return {
+              ...req,
+              url: publicUrl,
+              status: 'Uploaded'
+            };
+          }
+        }
+        return req;
+      });
+
       // Update state
       setFormData(prev => ({
         ...prev,
-        asset_requirements: (prev.asset_requirements || []).map(req => {
-          if (req.id === requirementId) {
-            if (isThumbnail) {
-              return {
-                ...req,
-                thumbnailUrl: publicUrl
-              };
-            } else {
-              return {
-                ...req,
-                url: publicUrl,
-                status: 'Uploaded',
-                isApproved: false
-              };
-            }
-          }
-          return req;
-        })
+        asset_requirements: nextRequirements
       }));
+
+      // Sync changes back to database immediately if editing existing project
+      if (project?.id) {
+        try {
+          const { error } = await supabase
+            .from('content_projects')
+            .update({ asset_requirements: nextRequirements })
+            .eq('id', project.id);
+          if (error) throw error;
+        } catch (err) {
+          console.error('Failed to sync uploaded asset to Supabase:', err);
+        }
+      }
     } catch (err) {
       console.error('Error uploading file to Supabase:', err);
       alert('Upload failed: ' + (err.message || err));
@@ -702,6 +738,34 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
         return req;
       })
     }));
+  };
+
+  const handleSaveAssetTitle = async (requirementId, newTitle) => {
+    // Update local state
+    const updatedRequirements = (formData.asset_requirements || []).map(r => {
+      if (r.id === requirementId) {
+        return { ...r, title: newTitle };
+      }
+      return r;
+    });
+
+    setFormData(prev => ({
+      ...prev,
+      asset_requirements: updatedRequirements
+    }));
+
+    // Sync to remote database immediately if editing existing project
+    if (project?.id) {
+      try {
+        const { error } = await supabase
+          .from('content_projects')
+          .update({ asset_requirements: updatedRequirements })
+          .eq('id', project.id);
+        if (error) throw error;
+      } catch (err) {
+        console.error('Failed to sync updated asset title to Supabase:', err);
+      }
+    }
   };
 
   const handleUpdateAssetVideoUrl = (requirementId, value) => {
@@ -2003,7 +2067,7 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                           </span>
                         </span>
                         {videoAssets.length > 0 ? (
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="columns-1 md:columns-2 xl:columns-3 gap-4">
                             {videoAssets.map((req) => {
                               const platforms = ['pensala', 'facebook', 'youtube', 'instagram', 'tiktok', 'linkedin'];
                               const pendingPublishCount = platforms.reduce((acc, platform) => {
@@ -2044,7 +2108,7 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                           </span>
                         </span>
                         {imageAssets.length > 0 ? (
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="columns-1 md:columns-2 xl:columns-3 gap-4">
                             {imageAssets.map((req) => {
                               const platforms = ['pensala', 'facebook', 'youtube', 'instagram', 'tiktok', 'linkedin'];
                               const pendingPublishCount = platforms.reduce((acc, platform) => {
@@ -2133,7 +2197,7 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                           </span>
                         </span>
                         {videoAssets.length > 0 ? (
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="columns-1 md:columns-2 xl:columns-3 gap-4">
                             {videoAssets.map((req) => (
                               <AssetCard
                                 key={req.id}
@@ -2167,7 +2231,7 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                           </span>
                         </span>
                         {imageAssets.length > 0 ? (
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="columns-1 md:columns-2 xl:columns-3 gap-4">
                             {imageAssets.map((req) => (
                               <AssetCard
                                 key={req.id}
@@ -2717,14 +2781,21 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                     <span className="text-[9px] uppercase font-extrabold tracking-widest text-[#109FC6]">
                       {req.type} Requirement
                     </span>
-                    <h3 className="text-sm font-black text-[#1F2937] truncate max-w-xs mt-0.5">
-                      {req.title}
-                    </h3>
+                    <input
+                      type="text"
+                      value={editingAssetTitle}
+                      onChange={(e) => setEditingAssetTitle(e.target.value)}
+                      placeholder="Enter deliverable title..."
+                      className="text-sm font-black text-[#1F2937] bg-transparent border-b border-transparent hover:border-slate-300 focus:border-[#109FC6] focus:outline-none py-0.5 mt-0.5 w-64 sm:w-80 transition-colors"
+                    />
                   </div>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setSelectedAssetForUpload(null)}
+                      onClick={async () => {
+                        await handleSaveAssetTitle(req.id, editingAssetTitle);
+                        setSelectedAssetForUpload(null);
+                      }}
                       className="px-3.5 py-1.5 bg-[#109FC6] hover:bg-[#0d82a2] text-white text-[10px] font-bold uppercase tracking-wider rounded-lg transition shadow-sm cursor-pointer"
                     >
                       Save & Close
@@ -2819,6 +2890,7 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                             type="file"
                             accept="image/*"
                             className="hidden"
+                            onClick={(e) => { e.target.value = ''; }}
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               if (file) handleUploadAsset(req.id, file);
@@ -2914,6 +2986,7 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                                 type="file"
                                 accept="video/*"
                                 className="hidden"
+                                onClick={(e) => { e.target.value = ''; }}
                                 onChange={(e) => {
                                   const file = e.target.files?.[0];
                                   if (file) handleUploadAsset(req.id, file);
@@ -3029,6 +3102,7 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
                                 type="file"
                                 accept="image/*"
                                 className="hidden"
+                                onClick={(e) => { e.target.value = ''; }}
                                 onChange={(e) => {
                                   const file = e.target.files?.[0];
                                   if (file) handleUploadAsset(req.id, file, true);
