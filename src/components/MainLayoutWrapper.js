@@ -16,12 +16,19 @@ export default function MainLayoutWrapper({ children }) {
     setIsMobileMenuOpen(false);
   }, [pathname]);
 
+  const isAuthPage = pathname === '/login' || pathname === '/register';
+
+  // Redirect to login if not authenticated and trying to access a protected route
+  useEffect(() => {
+    if (!loading && !user && !isAuthPage) {
+      router.push('/login');
+    }
+  }, [user, loading, isAuthPage, router]);
+
   const handleLogout = async () => {
     await logout();
     router.push('/login');
   };
-
-  const isAuthPage = pathname === '/login' || pathname === '/register';
 
   if (loading) {
     return (

@@ -43,8 +43,16 @@ export default function MarketingContentPage() {
       console.error('Fetch failed, loading mock projects:', err);
       if (typeof window !== 'undefined') {
         const val = localStorage.getItem('mock_content_projects');
+        let parsed = null;
         if (val) {
-          setProjects(JSON.parse(val));
+          try {
+            parsed = JSON.parse(val);
+          } catch (e) {
+            console.error('Failed to parse mock_content_projects:', e);
+          }
+        }
+        if (parsed) {
+          setProjects(parsed);
         } else {
           // Initialize mock if none exists
           const initial = [
@@ -105,7 +113,13 @@ export default function MarketingContentPage() {
     if (typeof window !== 'undefined') {
       const handleSync = () => {
         const val = localStorage.getItem('mock_content_projects');
-        if (val) setProjects(JSON.parse(val));
+        if (val) {
+          try {
+            setProjects(JSON.parse(val));
+          } catch (e) {
+            console.error('Failed to parse sync mock_content_projects:', e);
+          }
+        }
       };
       window.addEventListener('mock-db-updated', handleSync);
       return () => window.removeEventListener('mock-db-updated', handleSync);

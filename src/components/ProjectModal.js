@@ -4,7 +4,6 @@ import { getStageByIdDynamic } from '@/lib/role-config';
 import { useAuth } from '@/lib/AuthContext';
 import { supabase } from '@/lib/supabase';
 import AssetCard from './AssetCard';
-import * as tus from 'tus-js-client';
 
 const getYouTubeId = (url) => {
   if (!url) return null;
@@ -481,147 +480,162 @@ export default function ProjectModal({ isOpen, onClose, project, initialStatus, 
       const suffix = isThumbnail ? '_thumb_' : '';
       const filePath = `projects/${projectId}/${requirementId}${suffix}_${Date.now()}_${uniqueId}.${fileExt}`;
 
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-
-      const startTime = Date.now();
-
-      const upload = new tus.Upload(file, {
-        endpoint: `${supabaseUrl}/storage/v1/upload/resumable`,
-        retryDelays: [0, 3000, 5000, 10000, 20000],
-        headers: {
-          Authorization: `Bearer ${token}`,
-          apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-          'x-upsert': 'true'
-        },
-        uploadUrl: localStorage.getItem(`tus_upload_${requirementId}`), // Try to retrieve saved upload url for resuming
-        metadata: {
-          bucketName: 'project-assets',
-          objectName: filePath,
-          contentType: file.type || 'application/octet-stream'
-        },
-        onError: function (error) {
-          console.error("Failed because: " + error);
-          alert("Upload failed: " + error.message + ". We will attempt to resume if you upload the file again.");
-          setIsUploading(false);
-        },
-        onProgress: function (bytesSent, bytesTotal) {
-          const percent = Math.round((bytesSent * 100) / bytesTotal);
-          let displayPercent = percent;
-          let statusText = 'Uploading...';
-          let timeRemainingText = '';
-          
-          if (percent >= 90) {
-            displayPercent = 90;
-            statusText = 'Saving to Storage...';
-          } else {
-            displayPercent = percent;
+      // Upload file directly to Supabase Storage with progress tracking
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const uploadUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/project-assets/${filePath}`;
+        xhr.open('POST', uploadUrl, true);
+        
+        const startTime = Date.now();
+        
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const loaded = e.loaded;
+            const total = e.total;
             
-            const elapsedMs = Date.now() - startTime;
-            const speedBps = bytesSent / (elapsedMs / 1000);
-            if (speedBps > 0) {
-              const bytesRemaining = bytesTotal - bytesSent;
-              const secondsRemaining = Math.round(bytesRemaining / speedBps);
+            const percent = Math.round((loaded * 100) / total);
+            let displayPercent = percent;
+            let statusText = 'Uploading...';
+            let timeRemainingText = '';
+            
+            if (percent >= 90) {
+              displayPercent = 90;
+              statusText = 'Saving to Storage...';
+            } else {
+              displayPercent = percent;
               
-              if (secondsRemaining > 60) {
-                const mins = Math.floor(secondsRemaining / 60);
-                const secs = secondsRemaining % 60;
-                timeRemainingText = `~${mins} min ${secs} sec remaining`;
-              } else {
-                timeRemainingText = `~${secondsRemaining} secs remaining`;
-              }
-            }
-          }
-
-          if (isThumbnail) {
-            setThumbUpload(prev => ({
-              ...prev,
-              progress: displayPercent,
-              statusText,
-              timeRemaining: timeRemainingText
-            }));
-          } else {
-            setVideoUpload(prev => ({
-              ...prev,
-              progress: displayPercent,
-              statusText,
-              timeRemaining: timeRemainingText
-            }));
-          }
-        },
-        onSuccess: async function () {
-          // Clear saved upload url
-          localStorage.removeItem(`tus_upload_${requirementId}`);
-
-          // Get public URL
-          const { data: urlData } = supabase.storage
-            .from('project-assets')
-            .getPublicUrl(filePath);
-
-          const publicUrl = urlData.publicUrl;
-
-          if (isThumbnail) {
-            setThumbUpload(prev => ({
-              ...prev,
-              progress: 100,
-              statusText: 'Upload Complete',
-              timeRemaining: ''
-            }));
-          } else {
-            setVideoUpload(prev => ({
-              ...prev,
-              progress: 100,
-              statusText: 'Upload Complete',
-              timeRemaining: ''
-            }));
-          }
-          
-          await new Promise(resolve => setTimeout(resolve, 1000));
-
-          setFormData(prev => ({
-            ...prev,
-            asset_requirements: (prev.asset_requirements || []).map(req => {
-              if (req.id === requirementId) {
-                if (isThumbnail) {
-                  return {
-                    ...req,
-                    thumbnailUrl: publicUrl
-                  };
+              const elapsedMs = Date.now() - startTime;
+              const speedBps = loaded / (elapsedMs / 1000);
+              if (speedBps > 0) {
+                const bytesRemaining = total - loaded;
+                const secondsRemaining = Math.round(bytesRemaining / speedBps);
+                
+                if (secondsRemaining > 60) {
+                  const mins = Math.floor(secondsRemaining / 60);
+                  const secs = secondsRemaining % 60;
+                  timeRemainingText = `~${mins} min ${secs} sec remaining`;
                 } else {
-                  return {
-                    ...req,
-                    url: publicUrl,
-                    status: 'Uploaded',
-                    isApproved: false
-                  };
+                  timeRemainingText = `~${secondsRemaining} secs remaining`;
                 }
               }
-              return req;
-            })
-          }));
-          setIsUploading(false);
-        }
+            }
+            
+            if (isThumbnail) {
+              setThumbUpload(prev => ({
+                ...prev,
+                progress: displayPercent,
+                statusText,
+                timeRemaining: timeRemainingText
+              }));
+            } else {
+              setVideoUpload(prev => ({
+                ...prev,
+                progress: displayPercent,
+                statusText,
+                timeRemaining: timeRemainingText
+              }));
+            }
+          }
+        };
+        
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const resData = JSON.parse(xhr.responseText);
+              resolve(resData);
+            } catch (err) {
+              reject(new Error('Invalid response from Supabase Storage'));
+            }
+          } else {
+            reject(new Error(`Upload failed with status ${xhr.status}`));
+          }
+        };
+        
+        xhr.onerror = () => {
+          reject(new Error('Network error occurred during upload'));
+        };
+        
+        xhr.onabort = () => {
+          reject(new Error('Upload aborted'));
+        };
+        
+        xhr.setRequestHeader('Authorization', `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`);
+        xhr.setRequestHeader('apikey', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+        xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+        xhr.send(file);
       });
 
-      // Save upload url on creation or progress
-      upload.findPreviousUploads().then(function (previousUploads) {
-        if (previousUploads.length) {
-          upload.resumeFromPreviousUpload(previousUploads[0]);
-        }
-        
-        upload.start();
-        
-        // Save the upload url for manual persistence
-        if (upload.url) {
-          localStorage.setItem(`tus_upload_${requirementId}`, upload.url);
-        }
-      });
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('project-assets')
+        .getPublicUrl(filePath);
 
+      const publicUrl = urlData.publicUrl;
+
+      if (isThumbnail) {
+        setThumbUpload(prev => ({
+          ...prev,
+          progress: 100,
+          statusText: 'Upload Complete',
+          timeRemaining: ''
+        }));
+      } else {
+        setVideoUpload(prev => ({
+          ...prev,
+          progress: 100,
+          statusText: 'Upload Complete',
+          timeRemaining: ''
+        }));
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Update state
+      setFormData(prev => ({
+        ...prev,
+        asset_requirements: (prev.asset_requirements || []).map(req => {
+          if (req.id === requirementId) {
+            if (isThumbnail) {
+              return {
+                ...req,
+                thumbnailUrl: publicUrl
+              };
+            } else {
+              return {
+                ...req,
+                url: publicUrl,
+                status: 'Uploaded',
+                isApproved: false
+              };
+            }
+          }
+          return req;
+        })
+      }));
     } catch (err) {
       console.error('Error uploading file to Supabase:', err);
       alert('Upload failed: ' + (err.message || err));
+    } finally {
       setIsUploading(false);
+      if (isThumbnail) {
+        setThumbUpload({
+          requirementId: null,
+          progress: 0,
+          statusText: 'Uploading...',
+          timeRemaining: '',
+          fileName: '',
+          fileSize: ''
+        });
+      } else {
+        setVideoUpload({
+          requirementId: null,
+          progress: 0,
+          statusText: 'Uploading...',
+          timeRemaining: '',
+          fileName: '',
+          fileSize: ''
+        });
+      }
     }
   };
 
